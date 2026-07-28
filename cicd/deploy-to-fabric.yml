@@ -9,7 +9,7 @@ on:
       items_in_scope:
         description: "Fabric item types to deploy (JSON array)"
         required: false
-        default: '["Notebook","DataPipeline","Warehouse"]'
+        default: '["Notebook","DataPipeline","Warehouse","SemanticModel"]'
 
 permissions:
   contents: read
@@ -56,7 +56,7 @@ jobs:
             --target-env     "prod" \
             --workspace-name "${{ vars.PROD_WORKSPACE_NAME }}" \
             --git-directory  "${{ vars.GIT_DIRECTORY }}" \
-            --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"Warehouse\"]' }}"
+            --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"Warehouse\",\"SemanticModel\"]' }}"
 
       - name: Phase 2 - Grant SP permissions and get SQL endpoint
         run: |
