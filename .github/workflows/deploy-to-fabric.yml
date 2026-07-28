@@ -46,6 +46,11 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r cicd/requirements.txt
+
       - name: Check expected folders exist
         run: |
           set -e
@@ -60,7 +65,7 @@ jobs:
       - name: Check deployment scripts exist
         run: |
           set -e
-          for f in cicd/deploy.py cicd/grant_and_get_endpoints.py cicd/parameter.yml; do
+          for f in cicd/deploy.py cicd/grant_and_get_endpoints.py cicd/parameter.yml cicd/requirements.txt; do
             if [ ! -f "$f" ]; then
               echo "::error::Missing required script: $f"
               exit 1
@@ -125,7 +130,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install fabric-cicd azure-identity requests pyodbc
+          pip install -r cicd/requirements.txt
 
       - name: Install SqlPackage
         run: dotnet tool install --global microsoft.sqlpackage
