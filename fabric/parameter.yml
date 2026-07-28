@@ -1,0 +1,11 @@
+find_replace:
+  - find_value: '([a-z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com)'
+    is_regex: "true"
+    replace_value:
+      test: "$items.Warehouse.insurance_WH.sqlendpoint"
+    item_type: "SemanticModel"
+
+  - find_value: "<DEV_WAREHOUSE_GUID>"
+    replace_value:
+      test: "$items.Warehouse.insurance_WH.id"
+    item_type: "SemanticModel"
