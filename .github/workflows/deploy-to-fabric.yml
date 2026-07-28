@@ -6,6 +6,9 @@ on:
   push:
     branches:
       - test
+      # Add "- prod" here once a prod branch/workspace/environment exist.
+      # No other change is needed — target_env, workspace lookups, and the
+      # GitHub environment gate all derive from the branch name automatically.
   workflow_dispatch:
     inputs:
       items_in_scope:
@@ -24,7 +27,7 @@ permissions:
 # Never let two deployments touch the same workspace at once. Queue instead of
 # cancelling — a half-applied deployment is worse than a delayed one.
 concurrency:
-  group: deploy-fabric-test
+  group: deploy-fabric-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -74,9 +77,12 @@ jobs:
           done
 
       - name: Validate parameter.yml parses
+        env:
+          TARGET_ENV: ${{ github.ref_name }}
         run: |
           python - <<'EOF'
-          import sys, pathlib, yaml
+          import sys, os, pathlib, yaml
+          target_env = os.environ["TARGET_ENV"]
           p = pathlib.Path("cicd/parameter.yml")
           if not p.exists():
               print("::notice::cicd/parameter.yml not present — skipping")
@@ -88,12 +94,14 @@ jobs:
               sys.exit(1)
           entries = doc.get("find_replace", [])
           print(f"parameter.yml parsed — {len(entries)} find_replace entries")
+          print(f"checking against target environment: {target_env}")
           for i, e in enumerate(entries, 1):
-              if "<DEV_WAREHOUSE_GUID>" in str(e.get("find_value", "")):
-                  print(f"::error::Entry {i} still contains the <DEV_WAREHOUSE_GUID> placeholder")
+              fv = str(e.get("find_value", ""))
+              if fv.startswith("<") and fv.endswith(">"):
+                  print(f"::error::Entry {i} still contains an unfilled placeholder: {fv}")
                   sys.exit(1)
-              if "test" not in (e.get("replace_value") or {}):
-                  print(f"::error::Entry {i} has no 'test' key in replace_value")
+              if target_env not in (e.get("replace_value") or {}):
+                  print(f"::error::Entry {i} has no '{target_env}' key in replace_value")
                   sys.exit(1)
           print("parameter.yml checks passed")
           EOF
@@ -102,11 +110,18 @@ jobs:
   # Deploy
   # ====================================================================
   deploy_to_test:
-    name: Deploy to my-test workspace
+    name: Deploy to Fabric (${{ github.ref_name }})
     needs: validate
     runs-on: ubuntu-latest
-    environment: test
+    environment: ${{ github.ref_name }}
     timeout-minutes: 30
+
+    env:
+      # Derived from the branch that triggered the run — "test" today,
+      # "prod" automatically once that branch exists. Nothing here needs
+      # editing when a new environment is added; see §11 of the
+      # best-practice doc.
+      TARGET_ENV: ${{ github.ref_name }}
 
     steps:
       - name: Checkout repository
@@ -161,8 +176,8 @@ jobs:
             --tenant-id      "${{ secrets.AZURE_TENANT_ID }}" \
             --client-id      "${{ secrets.AZURE_CLIENT_ID }}" \
             --client-secret  "${{ secrets.AZURE_CLIENT_SECRET }}" \
-            --target-env     "test" \
-            --workspace-name "${{ vars.TEST_WORKSPACE_NAME }}" \
+            --target-env     "${{ env.TARGET_ENV }}" \
+            --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
             --git-directory  "${{ vars.GIT_DIRECTORY }}" \
             --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"Warehouse\",\"SemanticModel\"]' }}" \
             --unpublish-orphans "${{ github.event.inputs.unpublish_orphans || 'true' }}"
@@ -177,7 +192,7 @@ jobs:
             --tenant-id       "${{ secrets.AZURE_TENANT_ID }}" \
             --client-id       "${{ secrets.AZURE_CLIENT_ID }}" \
             --client-secret   "${{ secrets.AZURE_CLIENT_SECRET }}" \
-            --workspace-id    "${{ vars.TEST_WORKSPACE_ID }}" \
+            --workspace-id    "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
             --warehouse-names "insurance_WH" \
             --sp-object-id    "${{ vars.SP_OBJECT_ID }}"
 
@@ -222,7 +237,7 @@ jobs:
             echo ""
             echo "| Setting | Value |"
             echo "|---|---|"
-            echo "| Workspace | \`${{ vars.TEST_WORKSPACE_NAME }}\` |"
+            echo "| Workspace | \`${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}\` |"
             echo "| Warehouse | \`insurance_WH\` (Bronze + Gold) |"
             echo "| Commit | \`${{ github.sha }}\` |"
             echo ""
