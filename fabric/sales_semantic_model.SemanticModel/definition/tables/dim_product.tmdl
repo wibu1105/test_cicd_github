@@ -1,0 +1,168 @@
+table dim_product
+	lineageTag: f2cca036-5736-4aa3-9866-c31631d81601
+	sourceLineageTag: [Gold].[dim_product]
+
+	column product_key
+		dataType: int64
+		formatString: 0
+		lineageTag: 9d021562-0226-4f62-b951-ce4b3dd188f8
+		sourceLineageTag: product_key
+		summarizeBy: none
+		sourceColumn: product_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_id
+		dataType: int64
+		formatString: 0
+		lineageTag: e2ffbf98-a59b-4bae-954e-412073a160eb
+		sourceLineageTag: product_id
+		summarizeBy: none
+		sourceColumn: product_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column sku
+		dataType: string
+		lineageTag: a1cf376e-f731-43b2-83c2-e1e3857a1487
+		sourceLineageTag: sku
+		summarizeBy: none
+		sourceColumn: sku
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_name
+		dataType: string
+		lineageTag: 3191d7cd-a8fc-40e8-9a0c-8a5e2ad88b65
+		sourceLineageTag: product_name
+		summarizeBy: none
+		sourceColumn: product_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column brand
+		dataType: string
+		lineageTag: 3fb9253d-a791-4688-b21e-9fb3dffd50bd
+		sourceLineageTag: brand
+		summarizeBy: none
+		sourceColumn: brand
+
+		annotation SummarizationSetBy = Automatic
+
+	column brand_country
+		dataType: string
+		lineageTag: ad8ca2bf-748c-4140-a43e-0ecd3d011088
+		sourceLineageTag: brand_country
+		summarizeBy: none
+		sourceColumn: brand_country
+
+		annotation SummarizationSetBy = Automatic
+
+	column category
+		dataType: string
+		lineageTag: 84d61ab5-bbea-4225-a2ec-2e6cf508f7c9
+		sourceLineageTag: category
+		summarizeBy: none
+		sourceColumn: category
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_status
+		dataType: string
+		lineageTag: 37a9dadd-0238-483e-a0d2-9d2ff502f977
+		sourceLineageTag: product_status
+		summarizeBy: none
+		sourceColumn: product_status
+
+		annotation SummarizationSetBy = Automatic
+
+	column unit_of_measure
+		dataType: string
+		lineageTag: 4ddae0b2-25e3-4e2d-93a2-ad6793aab4ec
+		sourceLineageTag: unit_of_measure
+		summarizeBy: none
+		sourceColumn: unit_of_measure
+
+		annotation SummarizationSetBy = Automatic
+
+	column current_unit_price
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		lineageTag: 0b8b30fa-e00a-4783-874e-da1c114806b2
+		sourceLineageTag: current_unit_price
+		summarizeBy: none
+		sourceColumn: current_unit_price
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column weight_kg
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		lineageTag: 8c69b203-2731-4fbc-9b6f-608d827c4de1
+		sourceLineageTag: weight_kg
+		summarizeBy: none
+		sourceColumn: weight_kg
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column warranty_months
+		dataType: int64
+		formatString: 0
+		lineageTag: 9e0ace6b-71be-4eeb-acb6-6b847ab54fa5
+		sourceLineageTag: warranty_months
+		summarizeBy: none
+		sourceColumn: warranty_months
+
+		annotation SummarizationSetBy = Automatic
+
+	column introduced_date
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 2d194b27-1edc-464c-a5a2-db7cfae0a3e6
+		sourceLineageTag: introduced_date
+		summarizeBy: none
+		sourceColumn: introduced_date
+
+		annotation SummarizationSetBy = Automatic
+
+	column effective_from
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 8c4c162f-a8dd-41cc-a1e9-4329bf491d21
+		sourceLineageTag: effective_from
+		summarizeBy: none
+		sourceColumn: effective_from
+
+		annotation SummarizationSetBy = Automatic
+
+	column effective_to
+		dataType: dateTime
+		formatString: General Date
+		lineageTag: 13b6c543-4f10-40ee-b677-f02ab2a35d50
+		sourceLineageTag: effective_to
+		summarizeBy: none
+		sourceColumn: effective_to
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_current
+		dataType: int64
+		formatString: 0
+		lineageTag: 5b6abb27-d5f6-44a2-a4e2-5c14b681bf96
+		sourceLineageTag: is_current
+		summarizeBy: none
+		sourceColumn: is_current
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_product = entity
+		mode: directLake
+		source
+			entityName: dim_product
+			schemaName: Gold
+			expressionSource: 'DirectLake - insurance_WH'
+
