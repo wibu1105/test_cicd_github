@@ -1,3 +1,5 @@
+# .github/workflows/deploy-to-fabric.yml
+
 name: Deploy to Fabric
 
 on:
@@ -10,15 +12,96 @@ on:
         description: "Fabric item types to deploy (JSON array)"
         required: false
         default: '["Notebook","DataPipeline","Warehouse","SemanticModel"]'
+      unpublish_orphans:
+        description: "Delete items in the workspace that are no longer in the repo"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+# Never let two deployments touch the same workspace at once. Queue instead of
+# cancelling — a half-applied deployment is worse than a delayed one.
+concurrency:
+  group: deploy-fabric-test
+  cancel-in-progress: false
+
 jobs:
+
+  # ====================================================================
+  # Fail fast on structural problems before touching any Fabric API
+  # ====================================================================
+  validate:
+    name: Validate repository structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check expected folders exist
+        run: |
+          set -e
+          for d in "fabric" "cicd" "fabric/insurance_WH.Warehouse"; do
+            if [ ! -d "$d" ]; then
+              echo "::error::Missing required directory: $d"
+              exit 1
+            fi
+            echo "OK: $d"
+          done
+
+      - name: Check deployment scripts exist
+        run: |
+          set -e
+          for f in cicd/deploy.py cicd/grant_and_get_endpoints.py cicd/parameter.yml; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing required script: $f"
+              exit 1
+            fi
+            echo "OK: $f"
+          done
+
+      - name: Validate parameter.yml parses
+        run: |
+          python - <<'EOF'
+          import sys, pathlib, yaml
+          p = pathlib.Path("cicd/parameter.yml")
+          if not p.exists():
+              print("::notice::cicd/parameter.yml not present — skipping")
+              sys.exit(0)
+          try:
+              doc = yaml.safe_load(p.read_text()) or {}
+          except yaml.YAMLError as e:
+              print(f"::error::parameter.yml is not valid YAML: {e}")
+              sys.exit(1)
+          entries = doc.get("find_replace", [])
+          print(f"parameter.yml parsed — {len(entries)} find_replace entries")
+          for i, e in enumerate(entries, 1):
+              if "<DEV_WAREHOUSE_GUID>" in str(e.get("find_value", "")):
+                  print(f"::error::Entry {i} still contains the <DEV_WAREHOUSE_GUID> placeholder")
+                  sys.exit(1)
+              if "test" not in (e.get("replace_value") or {}):
+                  print(f"::error::Entry {i} has no 'test' key in replace_value")
+                  sys.exit(1)
+          print("parameter.yml checks passed")
+          EOF
+
+  # ====================================================================
+  # Deploy
+  # ====================================================================
   deploy_to_test:
     name: Deploy to my-test workspace
+    needs: validate
     runs-on: ubuntu-latest
     environment: test
+    timeout-minutes: 30
 
     steps:
       - name: Checkout repository
@@ -47,6 +130,26 @@ jobs:
       - name: Install SqlPackage
         run: dotnet tool install --global microsoft.sqlpackage
 
+      # ----------------------------------------------------------------
+      # fabric-cicd only reads parameter.yml from the root of
+      # repository_directory. Keeping the source of truth in cicd/ lets
+      # fabric/ hold nothing but Fabric-owned item folders; the copy happens
+      # on the runner, so the repository itself stays clean.
+      # ----------------------------------------------------------------
+      - name: Stage parameter.yml into repository_directory
+        run: |
+          if [ -f cicd/parameter.yml ]; then
+            cp cicd/parameter.yml "${{ vars.GIT_DIRECTORY }}/parameter.yml"
+            echo "Staged cicd/parameter.yml -> ${{ vars.GIT_DIRECTORY }}/parameter.yml"
+          else
+            echo "::notice::No cicd/parameter.yml found — deploying without parameterisation"
+          fi
+
+      # ----------------------------------------------------------------
+      # Phase 1 — create/update all Fabric items.
+      # The warehouse arrives as an empty shell; the notebook, pipeline
+      # and semantic model are fully deployed.
+      # ----------------------------------------------------------------
       - name: Phase 1 - Deploy Fabric items via fabric-cicd
         run: |
           python cicd/deploy.py \
@@ -56,8 +159,13 @@ jobs:
             --target-env     "test" \
             --workspace-name "${{ vars.TEST_WORKSPACE_NAME }}" \
             --git-directory  "${{ vars.GIT_DIRECTORY }}" \
-            --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"Warehouse\",\"SemanticModel\"]' }}"
+            --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"Warehouse\",\"SemanticModel\"]' }}" \
+            --unpublish-orphans "${{ github.event.inputs.unpublish_orphans || 'true' }}"
 
+      # ----------------------------------------------------------------
+      # Phase 2 — resolve the SQL endpoint and grant the SP db_ddladmin.
+      # Writes INSURANCE_WH_ENDPOINT to GITHUB_ENV for later steps.
+      # ----------------------------------------------------------------
       - name: Phase 2 - Grant SP permissions and get SQL endpoint
         run: |
           python cicd/grant_and_get_endpoints.py \
@@ -68,10 +176,25 @@ jobs:
             --warehouse-names "insurance_WH" \
             --sp-object-id    "${{ vars.SP_OBJECT_ID }}"
 
+      - name: Verify endpoint was resolved
+        run: |
+          if [ -z "${{ env.INSURANCE_WH_ENDPOINT }}" ]; then
+            echo "::error::INSURANCE_WH_ENDPOINT is empty. Check the env var name written by grant_and_get_endpoints.py."
+            exit 1
+          fi
+          echo "Endpoint resolved OK"
+
+      # ----------------------------------------------------------------
+      # Pin .NET 8 — newer SDKs are incompatible with the
+      # microsoft.build.sql version Fabric's .sqlproj files use.
+      # ----------------------------------------------------------------
       - name: Pin .NET SDK to 8.x for sqlproj compatibility
         run: |
           echo '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' > global.json
 
+      # ----------------------------------------------------------------
+      # Phase 3 — build and publish Bronze + Gold in a single dacpac.
+      # ----------------------------------------------------------------
       - name: Phase 3a - Build insurance_WH dacpac
         run: |
           dotnet build fabric/insurance_WH.Warehouse/insurance_WH.sqlproj \
@@ -86,9 +209,21 @@ jobs:
             /p:AllowIncompatiblePlatform=true \
             /p:DropObjectsNotInSource=false
 
-      - name: Phase 4 - Seed Bronze schema with demo data
+      - name: Deployment summary
+        if: always()
         run: |
-          python cicd/seed_source_wh.py \
-            --client-id     "${{ secrets.AZURE_CLIENT_ID }}" \
-            --client-secret "${{ secrets.AZURE_CLIENT_SECRET }}" \
-            --endpoint      "${{ env.INSURANCE_WH_ENDPOINT }}"
+          {
+            echo "### Fabric deployment"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            echo "| Workspace | \`${{ vars.TEST_WORKSPACE_NAME }}\` |"
+            echo "| Warehouse | \`insurance_WH\` (Bronze + Gold) |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo ""
+            echo "**Manual steps still required:**"
+            echo "- Load data into \`Bronze\` (schemas are deployed empty)"
+            echo "- Bind data source credentials on \`sales_semantic_model\`"
+            echo "- Confirm the semantic model points at the test warehouse"
+            echo "- Run \`pl_silver\` to populate Gold"
+          } >> "$GITHUB_STEP_SUMMARY"
