@@ -6,27 +6,17 @@
 -- META   "kernel_info": {
 -- META     "name": "sqldatawarehouse"
 -- META   },
--- META   "dependencies": {}
--- META }
-
--- CELL ********************
-
-ALTER TABLE Gold.fact_sales DROP CONSTRAINT FK_fact_sales_order_date;
-ALTER TABLE Gold.fact_sales DROP CONSTRAINT FK_fact_sales_ship_date;
-ALTER TABLE Gold.fact_sales DROP CONSTRAINT FK_fact_sales_customer;
-ALTER TABLE Gold.fact_sales DROP CONSTRAINT FK_fact_sales_product;
-ALTER TABLE Gold.fact_sales DROP CONSTRAINT FK_fact_sales_geography;
-ALTER TABLE Gold.fact_sales DROP CONSTRAINT FK_fact_sales_order_status;
-ALTER TABLE Gold.fact_sales_monthly_snapshot DROP CONSTRAINT FK_fsms_snapshot_date;
-ALTER TABLE Gold.fact_sales_monthly_snapshot DROP CONSTRAINT FK_fsms_customer;
-ALTER TABLE Gold.fact_sales_monthly_snapshot DROP CONSTRAINT FK_fsms_product;
-ALTER TABLE Gold.fact_sales_monthly_snapshot DROP CONSTRAINT FK_fsms_geography;
-
--- METADATA ********************
-
--- META {
--- META   "language": "sql",
--- META   "language_group": "sqldatawarehouse"
+-- META   "dependencies": {
+-- META     "warehouse": {
+-- META       "default_warehouse": "bffd60c6-9791-985f-41e0-8c375e59288a",
+-- META       "known_warehouses": [
+-- META         {
+-- META           "id": "bffd60c6-9791-985f-41e0-8c375e59288a",
+-- META           "type": "Datawarehouse"
+-- META         }
+-- META       ]
+-- META     }
+-- META   }
 -- META }
 
 -- CELL ********************
