@@ -1,4 +1,4 @@
-
+# cicd/deploy.py
 
 import argparse
 import json
@@ -21,8 +21,15 @@ def main():
     parser.add_argument(
         "--items-in-scope",
         required=False,
-        default='["Notebook","DataPipeline","Warehouse","SemanticModel"]',
+        default='["Notebook","DataPipeline","Warehouse","SemanticModel","Report"]',
         help="JSON array of Fabric item types to deploy"
+    )
+    parser.add_argument(
+        "--unpublish-orphans",
+        required=False,
+        default="true",
+        help="'true' to delete workspace items no longer present in the repo. "
+             "Set to 'false' during first runs or incident recovery."
     )
 
     args = parser.parse_args()
@@ -38,16 +45,20 @@ def main():
     repo_root = Path(__file__).resolve().parent.parent
     repository_directory = str(repo_root / args.git_directory)
 
-    # DEBUG — remove after first successful deployment
-    print(f"Script location    : {Path(__file__).resolve()}")
-    print(f"Repo root          : {repo_root}")
-    print(f"Repository dir     : {repository_directory}")
-    print(f"Directory exists   : {os.path.exists(repository_directory)}")
-    print(f"Directory contents : {os.listdir(repository_directory) if os.path.exists(repository_directory) else 'NOT FOUND'}")
+    # Fail early and clearly rather than letting fabric-cicd deploy nothing.
+    if not os.path.isdir(repository_directory):
+        raise SystemExit(
+            f"Repository directory not found: {repository_directory}\n"
+            f"Check the GIT_DIRECTORY variable — it should be the folder name "
+            f"holding the Fabric items (e.g. 'fabric'), not a workspace name."
+        )
 
+    print(f"Repository dir     : {repository_directory}")
+    print(f"Items found        : {sorted(os.listdir(repository_directory))}")
     print(f"Target environment : {args.target_env}")
     print(f"Target workspace   : {args.workspace_name}")
     print(f"Items in scope     : {items_in_scope}")
+    print(f"Unpublish orphans  : {args.unpublish_orphans}")
 
     workspace = FabricWorkspace(
         workspace_name=args.workspace_name,
@@ -58,7 +69,15 @@ def main():
     )
 
     publish_all_items(workspace)
-    unpublish_all_orphan_items(workspace)
+
+    # unpublish_all_orphan_items DELETES items from the target workspace that
+    # are not present in the repo. It is what keeps the workspace in sync, and
+    # it is also what will empty a workspace if --git-directory is wrong.
+    if args.unpublish_orphans.strip().lower() == "true":
+        print("Unpublishing orphan items...")
+        unpublish_all_orphan_items(workspace)
+    else:
+        print("Skipping unpublish of orphan items (--unpublish-orphans=false)")
 
 
 if __name__ == "__main__":
