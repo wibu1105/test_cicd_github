@@ -11,10 +11,7 @@ find_replace:
       test: "$items.Notebook.nb_transform.$id"
     item_type: "DataPipeline"
 
-  # Lakehouse ID
-  - find_value: "<DEV_LAKEHOUSE_GUID>"
-    replace_value:
-      test: "$items.Lakehouse.<LakehouseName>.$id"
+ 
 
   # Warehouse ID
   - find_value: "5e59288a-8c37-41e0-985f-9791bffd60c6"
