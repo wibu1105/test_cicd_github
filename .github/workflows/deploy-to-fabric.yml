@@ -156,11 +156,27 @@ jobs:
       # fabric/ hold nothing but Fabric-owned item folders; the copy happens
       # on the runner, so the repository itself stays clean.
       # ----------------------------------------------------------------
+      - name: Debug — show resolved variables
+        run: |
+          echo "GIT_DIRECTORY = [${{ vars.GIT_DIRECTORY }}]"
+          echo "ref_name      = [${{ github.ref_name }}]"
+          echo "workspace name= [${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}]"
+          echo "workspace id  = [${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}]"
+
       - name: Stage parameter.yml into repository_directory
         run: |
+          GITDIR="${{ vars.GIT_DIRECTORY }}"
+          if [ -z "$GITDIR" ]; then
+            echo "::error::GIT_DIRECTORY variable is empty. Set a repository variable named GIT_DIRECTORY = fabric (Settings → Secrets and variables → Actions → Variables)."
+            exit 1
+          fi
+          if [ ! -d "$GITDIR" ]; then
+            echo "::error::Directory '$GITDIR' does not exist in the repo. GIT_DIRECTORY should be the folder holding the Fabric items."
+            exit 1
+          fi
           if [ -f cicd/parameter.yml ]; then
-            cp cicd/parameter.yml "${{ vars.GIT_DIRECTORY }}/parameter.yml"
-            echo "Staged cicd/parameter.yml -> ${{ vars.GIT_DIRECTORY }}/parameter.yml"
+            cp cicd/parameter.yml "$GITDIR/parameter.yml"
+            echo "Staged cicd/parameter.yml -> $GITDIR/parameter.yml"
           else
             echo "::notice::No cicd/parameter.yml found — deploying without parameterisation"
           fi
