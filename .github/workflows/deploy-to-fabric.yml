@@ -232,6 +232,33 @@ jobs:
       # The warehouse arrives as an empty shell; the notebook, pipeline
       # and semantic model are fully deployed.
       # ----------------------------------------------------------------
+      - name: Check Azure secrets are set
+        env:
+          T: ${{ secrets.AZURE_TENANT_ID }}
+          C: ${{ secrets.AZURE_CLIENT_ID }}
+          S: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          # Never echo the secret values themselves — only whether they're
+          # present, and their length, which is enough to catch "empty" or
+          # "wrong secret pasted" without leaking anything into the log.
+          fail=0
+          check() {
+            name="$1"; val="$2"
+            if [ -z "$val" ]; then
+              echo "::error::Secret $name is empty or not set."
+              fail=1
+            else
+              echo "OK: $name is set (length ${#val})"
+            fi
+          }
+          check "AZURE_TENANT_ID"     "$T"
+          check "AZURE_CLIENT_ID"     "$C"
+          check "AZURE_CLIENT_SECRET" "$S"
+          if [ "$fail" = "1" ]; then
+            echo "::error::One or more Azure secrets are missing. Settings → Secrets and variables → Actions → Secrets, in THIS repository."
+            exit 1
+          fi
+
       - name: Phase 1 - Deploy Fabric items via fabric-cicd
         run: |
           python cicd/deploy.py \
