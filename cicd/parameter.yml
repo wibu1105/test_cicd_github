@@ -41,5 +41,5 @@ find_replace:
   - find_value: "ea18ae9b-d358-438a-a9a8-dd77ae43b23e"
     replace_value:
       # Đảm bảo "Notebook1" khớp chính xác với tên thư mục Notebook trong repo (Case-sensitive)
-      test: "$items.Notebook.Notebook1.$id"
+      test: "$items.Notebook.pl_silver.$id"
     item_type: "DataPipeline"
