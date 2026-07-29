@@ -1,0 +1,351 @@
+# .github/workflows/deploy-to-fabric.yml
+
+name: Deploy to Fabric
+
+on:
+  push:
+    branches:
+      - test
+      # Add "- prod" here once a prod branch/workspace/environment exist.
+      # No other change is needed — target_env, workspace lookups, and the
+      # GitHub environment gate all derive from the branch name automatically.
+  workflow_dispatch:
+    inputs:
+      items_in_scope:
+        description: "Fabric item types to deploy (JSON array)"
+        required: false
+        default: '["Notebook","DataPipeline","Warehouse","SemanticModel","Report"]'
+      unpublish_orphans:
+        description: "Delete items in the workspace that are no longer in the repo"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+# Never let two deployments touch the same workspace at once. Queue instead of
+# cancelling — a half-applied deployment is worse than a delayed one.
+concurrency:
+  group: deploy-fabric-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+
+  # ====================================================================
+  # Fail fast on structural problems before touching any Fabric API
+  # ====================================================================
+  validate:
+    name: Validate repository structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r cicd/requirements.txt
+
+      - name: Check expected folders exist
+        run: |
+          set -e
+          for d in "fabric" "cicd" "fabric/insurance_WH.Warehouse"; do
+            if [ ! -d "$d" ]; then
+              echo "::error::Missing required directory: $d"
+              exit 1
+            fi
+            echo "OK: $d"
+          done
+
+      - name: Check deployment scripts exist
+        run: |
+          set -e
+          for f in cicd/deploy.py cicd/grant_and_get_endpoints.py cicd/parameter.yml cicd/requirements.txt; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Missing required script: $f"
+              exit 1
+            fi
+            echo "OK: $f"
+          done
+
+      - name: Check Report connection type
+        run: |
+          python - <<'EOF'
+          import sys, json, pathlib
+
+          # Reports referencing their semantic model "byPath" are re-pointed
+          # automatically by fabric-cicd. "byConnection" is not — it would keep
+          # pointing at the DEV model after deployment, with no error raised.
+          # Catch that here rather than discovering it in a report reading the
+          # wrong data.
+          reports = list(pathlib.Path("fabric").glob("*.Report"))
+          if not reports:
+              print("::notice::No Report items found — skipping")
+              sys.exit(0)
+
+          failed = False
+          for r in reports:
+              pbir = r / "definition.pbir"
+              if not pbir.exists():
+                  print(f"::warning::{r.name}: definition.pbir not found, cannot verify")
+                  continue
+              try:
+                  ref = json.loads(pbir.read_text()).get("datasetReference", {})
+              except json.JSONDecodeError as e:
+                  print(f"::error::{r.name}: definition.pbir is not valid JSON: {e}")
+                  failed = True
+                  continue
+              if ref.get("byConnection"):
+                  print(f"::error::{r.name} uses byConnection. It will keep pointing at "
+                        f"the DEV semantic model unless a find_replace entry is added to "
+                        f"cicd/parameter.yml for item_type Report.")
+                  failed = True
+              elif ref.get("byPath"):
+                  print(f"OK: {r.name} uses byPath — resolved automatically")
+              else:
+                  print(f"::warning::{r.name}: unrecognised datasetReference shape")
+
+          sys.exit(1 if failed else 0)
+          EOF
+
+      - name: Validate parameter.yml parses
+        env:
+          TARGET_ENV: ${{ github.ref_name }}
+        run: |
+          python - <<'EOF'
+          import sys, os, pathlib, yaml
+          target_env = os.environ["TARGET_ENV"]
+          p = pathlib.Path("cicd/parameter.yml")
+          if not p.exists():
+              print("::notice::cicd/parameter.yml not present — skipping")
+              sys.exit(0)
+          try:
+              doc = yaml.safe_load(p.read_text()) or {}
+          except yaml.YAMLError as e:
+              print(f"::error::parameter.yml is not valid YAML: {e}")
+              sys.exit(1)
+          entries = doc.get("find_replace", [])
+          print(f"parameter.yml parsed — {len(entries)} find_replace entries")
+          print(f"checking against target environment: {target_env}")
+          for i, e in enumerate(entries, 1):
+              fv = str(e.get("find_value", ""))
+              if fv.startswith("<") and fv.endswith(">"):
+                  print(f"::error::Entry {i} still contains an unfilled placeholder: {fv}")
+                  sys.exit(1)
+              if target_env not in (e.get("replace_value") or {}):
+                  print(f"::error::Entry {i} has no '{target_env}' key in replace_value")
+                  sys.exit(1)
+          print("parameter.yml checks passed")
+          EOF
+
+  # ====================================================================
+  # Deploy
+  # ====================================================================
+  deploy_to_test:
+    name: Deploy to Fabric (${{ github.ref_name }})
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    timeout-minutes: 30
+
+    env:
+      # Derived from the branch that triggered the run — "test" today,
+      # "prod" automatically once that branch exists. Nothing here needs
+      # editing when a new environment is added; see §11 of the
+      # best-practice doc.
+      TARGET_ENV: ${{ github.ref_name }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.x"
+
+      - name: Install ODBC Driver 18 for SQL Server
+        run: |
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r cicd/requirements.txt
+
+      - name: Install SqlPackage
+        run: dotnet tool install --global microsoft.sqlpackage
+
+      # ----------------------------------------------------------------
+      # fabric-cicd only reads parameter.yml from the root of
+      # repository_directory. Keeping the source of truth in cicd/ lets
+      # fabric/ hold nothing but Fabric-owned item folders; the copy happens
+      # on the runner, so the repository itself stays clean.
+      # ----------------------------------------------------------------
+      - name: Resolve repository directory
+        id: gitdir
+        run: |
+          # Falls back to "fabric" when the GIT_DIRECTORY variable is unset, so
+          # the pipeline does not depend on a repository variable that never
+          # changes value. Override it only if the Fabric items folder is
+          # renamed.
+          GITDIR="${{ vars.GIT_DIRECTORY }}"
+          if [ -z "$GITDIR" ]; then
+            GITDIR="fabric"
+            echo "GIT_DIRECTORY not set — defaulting to '$GITDIR'"
+          else
+            echo "GIT_DIRECTORY = '$GITDIR'"
+          fi
+          if [ ! -d "$GITDIR" ]; then
+            echo "::error::Directory '$GITDIR' does not exist in the repo."
+            ls -la
+            exit 1
+          fi
+          echo "gitdir=$GITDIR" >> "$GITHUB_OUTPUT"
+
+      - name: Stage parameter.yml into repository directory
+        run: |
+          GITDIR="${{ steps.gitdir.outputs.gitdir }}"
+          if [ -f cicd/parameter.yml ]; then
+            cp cicd/parameter.yml "$GITDIR/parameter.yml"
+            echo "Staged cicd/parameter.yml -> $GITDIR/parameter.yml"
+          else
+            echo "::notice::No cicd/parameter.yml found — deploying without parameterisation"
+          fi
+
+      # ----------------------------------------------------------------
+      # Phase 1 — create/update all Fabric items.
+      # The warehouse arrives as an empty shell; the notebook, pipeline
+      # and semantic model are fully deployed.
+      # ----------------------------------------------------------------
+      - name: List available secret names
+        run: |
+          # GitHub masks secret VALUES in logs, but the key names are visible.
+          # This shows exactly which secrets this job can see — the fastest way
+          # to tell "added to the wrong tab/scope" from "added correctly".
+          echo "Secrets visible to this job:"
+          echo '${{ toJSON(secrets) }}' | python -c "import sys,json; d=json.load(sys.stdin); [print(' -', k) for k in sorted(d)]"
+          echo ""
+          echo "Variables visible to this job:"
+          echo '${{ toJSON(vars) }}' | python -c "import sys,json; d=json.load(sys.stdin); [print(f' - {k} = {v!r}') for k,v in sorted(d.items())]"
+
+      - name: Check Azure secrets are set
+        env:
+          T: ${{ secrets.AZURE_TENANT_ID }}
+          C: ${{ secrets.AZURE_CLIENT_ID }}
+          S: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          # Never echo the secret values themselves — only whether they're
+          # present, and their length, which is enough to catch "empty" or
+          # "wrong secret pasted" without leaking anything into the log.
+          fail=0
+          check() {
+            name="$1"; val="$2"
+            if [ -z "$val" ]; then
+              echo "::error::Secret $name is empty or not set."
+              fail=1
+            else
+              echo "OK: $name is set (length ${#val})"
+            fi
+          }
+          check "AZURE_TENANT_ID"     "$T"
+          check "AZURE_CLIENT_ID"     "$C"
+          check "AZURE_CLIENT_SECRET" "$S"
+          if [ "$fail" = "1" ]; then
+            echo "::error::One or more Azure secrets are missing. Settings → Secrets and variables → Actions → Secrets, in THIS repository."
+            exit 1
+          fi
+
+      - name: Phase 1 - Deploy Fabric items via fabric-cicd
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          python cicd/deploy.py \
+            --target-env     "${{ env.TARGET_ENV }}" \
+            --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
+            --git-directory  "${{ steps.gitdir.outputs.gitdir }}" \
+            --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"Warehouse\",\"SemanticModel\",\"Report\"]' }}" \
+            --unpublish-orphans "${{ github.event.inputs.unpublish_orphans || 'true' }}"
+
+      # ----------------------------------------------------------------
+      # Phase 2 — resolve the SQL endpoint and grant the SP db_ddladmin.
+      # Writes INSURANCE_WH_ENDPOINT to GITHUB_ENV for later steps.
+      # ----------------------------------------------------------------
+      - name: Phase 2 - Grant SP permissions and get SQL endpoint
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        run: |
+          python cicd/grant_and_get_endpoints.py \
+            --workspace-id    "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
+            --warehouse-names "insurance_WH" \
+            --sp-object-id    "${{ vars.SP_OBJECT_ID }}"
+
+      - name: Verify endpoint was resolved
+        run: |
+          if [ -z "${{ env.INSURANCE_WH_ENDPOINT }}" ]; then
+            echo "::error::INSURANCE_WH_ENDPOINT is empty. Check the env var name written by grant_and_get_endpoints.py."
+            exit 1
+          fi
+          echo "Endpoint resolved OK"
+
+      # ----------------------------------------------------------------
+      # Pin .NET 8 — newer SDKs are incompatible with the
+      # microsoft.build.sql version Fabric's .sqlproj files use.
+      # ----------------------------------------------------------------
+      - name: Pin .NET SDK to 8.x for sqlproj compatibility
+        run: |
+          echo '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' > global.json
+
+      # ----------------------------------------------------------------
+      # Phase 3 — build and publish Bronze + Gold in a single dacpac.
+      # ----------------------------------------------------------------
+      - name: Phase 3a - Build insurance_WH dacpac
+        run: |
+          dotnet build fabric/insurance_WH.Warehouse/insurance_WH.sqlproj \
+            --configuration Release \
+            --output .dacpac/insurance_WH
+
+      - name: Phase 3b - Publish Bronze + Gold schemas to my-test
+        run: |
+          sqlpackage /Action:Publish \
+            /SourceFile:".dacpac/insurance_WH/insurance_WH.dacpac" \
+            /TargetConnectionString:"Server=tcp:${{ env.INSURANCE_WH_ENDPOINT }},1433;Initial Catalog=insurance_WH;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;Authentication=Active Directory Service Principal;User Id=${{ secrets.AZURE_CLIENT_ID }};Password=${{ secrets.AZURE_CLIENT_SECRET }}" \
+            /p:AllowIncompatiblePlatform=true \
+            /p:DropObjectsNotInSource=false
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "### Fabric deployment"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            echo "| Workspace | \`${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}\` |"
+            echo "| Warehouse | \`insurance_WH\` (Bronze + Gold) |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo ""
+            echo "**Manual steps still required:**"
+            echo "- Load data into \`Bronze\` (schemas are deployed empty)"
+            echo "- Bind data source credentials on \`sales_semantic_model\`"
+            echo "- Confirm the semantic model points at the test warehouse"
+            echo "- Run \`pl_silver\` to populate Gold"
+          } >> "$GITHUB_STEP_SUMMARY"

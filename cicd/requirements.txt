@@ -1,0 +1,23 @@
+# cicd/requirements.txt
+#
+# Installed by both jobs in .github/workflows/deploy-to-fabric.yml.
+#
+# Versions are left open so the pipeline picks up fixes automatically. If a
+# release ever breaks the deployment, pin the offending package here (e.g.
+# fabric-cicd==0.1.33) rather than reverting the whole file.
+
+# Phase 1 — deploys Fabric items from the repo
+fabric-cicd
+
+# Service principal authentication for both Phase 1 and Phase 2
+azure-identity
+
+# Phase 2 — Fabric REST API and Microsoft Graph calls
+requests
+
+# Phase 2 — connects to the warehouse to run ALTER ROLE
+# Requires ODBC Driver 18, installed separately in the workflow via apt
+pyodbc
+
+# Used by the validate job to parse parameter.yml, and by fabric-cicd itself
+PyYAML
