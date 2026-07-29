@@ -96,18 +96,21 @@ jobs:
 
       - name: Build dacpac
         run: |
+          # Output directory deliberately has no leading dot: actions/upload-artifact
+          # skips hidden paths when matching globs, so a ".dacpac/" directory would
+          # build fine and then silently upload nothing.
           dotnet build "${{ steps.proj.outputs.path }}" \
             --configuration Release \
-            --output .dacpac/build
+            --output dacpac-out
 
       - name: Confirm dacpac was produced
         run: |
-          COUNT=$(find .dacpac -name '*.dacpac' | wc -l)
+          COUNT=$(find dacpac-out -name '*.dacpac' | wc -l)
           if [ "$COUNT" -eq 0 ]; then
             echo "::error::Build reported success but produced no .dacpac file."
             exit 1
           fi
-          find .dacpac -name '*.dacpac' -exec ls -lh {} \;
+          find dacpac-out -name '*.dacpac' -exec ls -lh {} \;
 
       # Keeping the artifact makes it possible to inspect exactly what would
       # have been deployed, without re-running the build.
@@ -115,7 +118,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dacpac-pr-${{ github.event.pull_request.number }}
-          path: .dacpac/**/*.dacpac
+          path: dacpac-out/**/*.dacpac
           retention-days: 7
           if-no-files-found: error
 
