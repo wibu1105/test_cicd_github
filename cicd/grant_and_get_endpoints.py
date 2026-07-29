@@ -149,10 +149,12 @@ def main():
     parser = argparse.ArgumentParser(
         description="Retrieve Fabric warehouse endpoint(s) and grant SP permissions"
     )
-    parser.add_argument("--tenant-id",       required=True)
-    parser.add_argument("--client-id",       required=True)
-    parser.add_argument("--client-secret",   required=True)
-    parser.add_argument("--workspace-id",    required=True)
+    # Credentials default to environment variables; see the note in deploy.py
+    # for why env vars are preferred over command-line arguments here.
+    parser.add_argument("--tenant-id",     required=False, default=os.environ.get("AZURE_TENANT_ID", ""))
+    parser.add_argument("--client-id",     required=False, default=os.environ.get("AZURE_CLIENT_ID", ""))
+    parser.add_argument("--client-secret", required=False, default=os.environ.get("AZURE_CLIENT_SECRET", ""))
+    parser.add_argument("--workspace-id",  required=True)
     parser.add_argument(
         "--warehouse-names",
         required=True,
@@ -168,14 +170,26 @@ def main():
     args = parser.parse_args()
     warehouse_names = [n.strip() for n in args.warehouse_names.split(",")]
 
+    tenant_id     = (args.tenant_id or "").strip()
+    client_id     = (args.client_id or "").strip()
+    client_secret = (args.client_secret or "").strip()
+
+    missing = [n for n, v in [
+        ("AZURE_TENANT_ID", tenant_id),
+        ("AZURE_CLIENT_ID", client_id),
+        ("AZURE_CLIENT_SECRET", client_secret),
+    ] if not v]
+    if missing:
+        raise SystemExit("Missing credential values: " + ", ".join(missing))
+
     # ------------------------------------------------------------------
     # Authenticate
     # ------------------------------------------------------------------
     print("\n--- Authenticating ---")
     credential = ClientSecretCredential(
-        tenant_id=args.tenant_id,
-        client_id=args.client_id,
-        client_secret=args.client_secret,
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=client_secret,
     )
 
     fabric_token = get_access_token(
@@ -187,7 +201,7 @@ def main():
     # Look up SP display name from Entra ID via Graph API
     # ------------------------------------------------------------------
     print("\n--- Looking up SP display name ---")
-    sp_display_name = get_sp_display_name(credential, args.client_id)
+    sp_display_name = get_sp_display_name(credential, client_id)
 
     # ------------------------------------------------------------------
     # Phase 2a: Retrieve warehouse endpoint(s)
@@ -208,8 +222,8 @@ def main():
         grant_db_ddladmin(
             endpoint=endpoint,
             database=name,
-            client_id=args.client_id,
-            client_secret=args.client_secret,
+            client_id=client_id,
+            client_secret=client_secret,
             sp_display_name=sp_display_name,
         )
         env_key = name.upper().replace(" ", "_") + "_ENDPOINT"
