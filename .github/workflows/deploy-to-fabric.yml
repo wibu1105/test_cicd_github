@@ -232,6 +232,17 @@ jobs:
       # The warehouse arrives as an empty shell; the notebook, pipeline
       # and semantic model are fully deployed.
       # ----------------------------------------------------------------
+      - name: List available secret names
+        run: |
+          # GitHub masks secret VALUES in logs, but the key names are visible.
+          # This shows exactly which secrets this job can see — the fastest way
+          # to tell "added to the wrong tab/scope" from "added correctly".
+          echo "Secrets visible to this job:"
+          echo '${{ toJSON(secrets) }}' | python -c "import sys,json; d=json.load(sys.stdin); [print(' -', k) for k in sorted(d)]"
+          echo ""
+          echo "Variables visible to this job:"
+          echo '${{ toJSON(vars) }}' | python -c "import sys,json; d=json.load(sys.stdin); [print(f' - {k} = {v!r}') for k,v in sorted(d.items())]"
+
       - name: Check Azure secrets are set
         env:
           T: ${{ secrets.AZURE_TENANT_ID }}
@@ -260,11 +271,12 @@ jobs:
           fi
 
       - name: Phase 1 - Deploy Fabric items via fabric-cicd
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
           python cicd/deploy.py \
-            --tenant-id      "${{ secrets.AZURE_TENANT_ID }}" \
-            --client-id      "${{ secrets.AZURE_CLIENT_ID }}" \
-            --client-secret  "${{ secrets.AZURE_CLIENT_SECRET }}" \
             --target-env     "${{ env.TARGET_ENV }}" \
             --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
             --git-directory  "${{ steps.gitdir.outputs.gitdir }}" \
@@ -276,11 +288,12 @@ jobs:
       # Writes INSURANCE_WH_ENDPOINT to GITHUB_ENV for later steps.
       # ----------------------------------------------------------------
       - name: Phase 2 - Grant SP permissions and get SQL endpoint
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         run: |
           python cicd/grant_and_get_endpoints.py \
-            --tenant-id       "${{ secrets.AZURE_TENANT_ID }}" \
-            --client-id       "${{ secrets.AZURE_CLIENT_ID }}" \
-            --client-secret   "${{ secrets.AZURE_CLIENT_SECRET }}" \
             --workspace-id    "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
             --warehouse-names "insurance_WH" \
             --sp-object-id    "${{ vars.SP_OBJECT_ID }}"
