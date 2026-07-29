@@ -1,36 +1,45 @@
+# cicd/parameter.yml
+#
+# Source of truth for parameterisation. Kept here (not in fabric/) so that
+# fabric/ contains nothing but Fabric-generated item folders. The workflow
+# copies this file to fabric/parameter.yml on the GitHub runner just before
+# Phase 1 — fabric-cicd only reads parameter.yml from the root of
+# repository_directory.
+#
+# Environment keys ("test") must match the value passed to --target-env.
+# Item type and item name are CASE SENSITIVE and must match the folder in
+# the repo exactly.
+
 find_replace:
+
+  # ------------------------------------------------------------------
+  # SEMANTIC MODEL
+  # Repoint the semantic model's warehouse connection — fully automatic.
+  # ------------------------------------------------------------------
   - find_value: 'Sql\.Database\(("[a-z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com",\s*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"\)'
     is_regex: "true"
     replace_value:
-      test: '"$items.Warehouse.insurance_WH.sqlendpoint", "$items.Warehouse.insurance_WH.id"'
+      # Lưu ý: Cập nhật thành .$sqlendpointid và .$id theo đúng chuẩn tài liệu mới nhất
+      test: '"$items.Warehouse.insurance_WH.$sqlendpointid", "$items.Warehouse.insurance_WH.$id"'
     item_type: "SemanticModel"
 
-  - find_value: "YOUR_DEV_WORKSPACE_GUID"
-    replace_value:
-      test: "$workspace.id"
-    item_type: "Notebook"
 
-  - find_value: "YOUR_DEV_LAKEHOUSE_GUID"
+  # ------------------------------------------------------------------
+  # DATA PIPELINE: WORKSPACE ID
+  # Thay thế Workspace ID tĩnh của môi trường DEV (áp dụng chung cho mọi Pipeline)
+  # ------------------------------------------------------------------
+  - find_value: "3e660685-3524-4c84-88e2-b0a04010cd18"
     replace_value:
-      test: "$items.Lakehouse.insurance_LH.id"
-    item_type: "Notebook"
-
-  - find_value: "YOUR_DEV_SQL_ENDPOINT_GUID"
-    replace_value:
-      test: "$items.Lakehouse.insurance_LH.sqlendpointid"  # ⚠️ test kỹ, attribute này chưa được xác nhận ổn định
-    item_type: "Notebook"
-
-  - find_value: "YOUR_DEV_NOTEBOOK_GUID"
-    replace_value:
-      test: "$items.Notebook.load_insurance.id"
+      test: "$workspace.$id"
     item_type: "DataPipeline"
 
-  - find_value: "YOUR_DEV_WAREHOUSE_GUID"
-    replace_value:
-      test: "$items.Warehouse.insurance_WH.id"
-    item_type: "DataPipeline"
 
-  - find_value: "YOUR_DEV_LAKEHOUSE_GUID"
+  # ------------------------------------------------------------------
+  # DATA PIPELINE: NOTEBOOK ID (pl_silver)
+  # Thay thế Notebook ID tĩnh của môi trường DEV thành Notebook ở TEST
+  # ------------------------------------------------------------------
+  - find_value: "ea18ae9b-d358-438a-a9a8-dd77ae43b23e"
     replace_value:
-      test: "$items.Lakehouse.insurance_LH.id"
+      # Đảm bảo "Notebook1" khớp chính xác với tên thư mục Notebook trong repo (Case-sensitive)
+      test: "$items.Notebook.Notebook1.$id"
     item_type: "DataPipeline"
