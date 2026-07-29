@@ -430,6 +430,21 @@
                 "value": "Automatic"
               }
             ]
+          },
+          {
+            "name": "is_vip",
+            "dataType": "boolean",
+            "sourceColumn": "is_vip",
+            "formatString": "\"TRUE\";\"TRUE\";\"FALSE\"",
+            "sourceProviderType": "bit",
+            "sourceLineageTag": "is_vip",
+            "summarizeBy": "none",
+            "annotations": [
+              {
+                "name": "SummarizationSetBy",
+                "value": "Automatic"
+              }
+            ]
           }
         ],
         "partitions": [
