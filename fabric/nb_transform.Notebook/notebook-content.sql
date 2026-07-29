@@ -21,13 +21,14 @@
 
 -- CELL ********************
 
-TRUNCATE TABLE Gold.fact_sales_monthly_snapshot;
-TRUNCATE TABLE Gold.fact_sales;
-TRUNCATE TABLE Gold.dim_order_status;
-TRUNCATE TABLE Gold.dim_geography;
-TRUNCATE TABLE Gold.dim_product;
-TRUNCATE TABLE Gold.dim_customer;
-TRUNCATE TABLE Gold.dim_date;
+DELETE FROM Gold.fact_sales_monthly_snapshot;
+DELETE FROM Gold.fact_sales;
+
+DELETE FROM Gold.dim_order_status;
+DELETE FROM Gold.dim_geography;
+DELETE FROM Gold.dim_product;
+DELETE FROM Gold.dim_customer;
+DELETE FROM Gold.dim_date;
 
 -- METADATA ********************
 
@@ -372,26 +373,6 @@ FROM (
         dc.customer_key, dp.product_key, dg.geography_key,
         YEAR(so.order_date), MONTH(so.order_date)
 ) monthly;
-
--- METADATA ********************
-
--- META {
--- META   "language": "sql",
--- META   "language_group": "sqldatawarehouse"
--- META }
-
--- CELL ********************
-
-ALTER TABLE Gold.fact_sales ADD CONSTRAINT FK_fact_sales_order_date FOREIGN KEY (order_date_key) REFERENCES Gold.dim_date (date_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales ADD CONSTRAINT FK_fact_sales_ship_date FOREIGN KEY (ship_date_key) REFERENCES Gold.dim_date (date_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales ADD CONSTRAINT FK_fact_sales_customer FOREIGN KEY (customer_key) REFERENCES Gold.dim_customer (customer_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales ADD CONSTRAINT FK_fact_sales_product FOREIGN KEY (product_key) REFERENCES Gold.dim_product (product_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales ADD CONSTRAINT FK_fact_sales_geography FOREIGN KEY (geography_key) REFERENCES Gold.dim_geography (geography_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales ADD CONSTRAINT FK_fact_sales_order_status FOREIGN KEY (order_status_key) REFERENCES Gold.dim_order_status (order_status_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales_monthly_snapshot ADD CONSTRAINT FK_fsms_snapshot_date FOREIGN KEY (snapshot_date_key) REFERENCES Gold.dim_date (date_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales_monthly_snapshot ADD CONSTRAINT FK_fsms_customer FOREIGN KEY (customer_key) REFERENCES Gold.dim_customer (customer_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales_monthly_snapshot ADD CONSTRAINT FK_fsms_product FOREIGN KEY (product_key) REFERENCES Gold.dim_product (product_key) NOT ENFORCED;
-ALTER TABLE Gold.fact_sales_monthly_snapshot ADD CONSTRAINT FK_fsms_geography FOREIGN KEY (geography_key) REFERENCES Gold.dim_geography (geography_key) NOT ENFORCED;
 
 -- METADATA ********************
 
