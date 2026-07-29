@@ -1,7 +1,6 @@
 
 
 
--- INSERT statements
 
 INSERT INTO Bronze.product_category (category_id, category_name) VALUES
     (1, 'Smartphone'),
@@ -12,6 +11,8 @@ INSERT INTO Bronze.product_category (category_id, category_name) VALUES
     (6, 'Television'),
     (7, 'Gaming Console');
 
+GO
+
 INSERT INTO Bronze.brand (brand_id, brand_name, country_id) VALUES
     (1, 'Apple',   1),
     (2, 'Samsung', 1),
@@ -20,13 +21,19 @@ INSERT INTO Bronze.brand (brand_id, brand_name, country_id) VALUES
     (5, 'LG',      1),
     (6, 'Bose',    1);
 
+GO
+
 INSERT INTO Bronze.unit_of_measure (uom_id, uom_code, uom_desc) VALUES
     (1, 'EA', 'Each');
+
+GO
 
 INSERT INTO Bronze.product_status (status_id, status_name) VALUES
     (1, 'Active'),
     (2, 'Discontinued'),
     (3, 'Coming Soon');
+
+GO
 
 INSERT INTO Bronze.product (product_id, sku, product_name, brand_id, category_id, status_id, unit_price, uom_id, weight_kg, warranty_months, introduced_date) VALUES
     (1,  'APL-IPH15PM',  'iPhone 15 Pro Max',               1, 1, 1, 1199.00, 1, 0.221, 12, '2023-09-22'),
@@ -50,48 +57,7 @@ INSERT INTO Bronze.product (product_id, sku, product_name, brand_id, category_id
     (19, 'LGE-C365',     'LG OLED C3 65-inch',              5, 6, 1, 1599.00, 1, 22.700, 12, '2023-02-20'),
     (20, 'MSF-XSX',      'Xbox Series X',                   4, 7, 1,  499.00, 1, 4.450, 12, '2020-11-10');
 
--- DDL
-
-CREATE TABLE Bronze.sales_order (
-    order_id       INT           NOT NULL,
-    customer_id    INT           NOT NULL,
-    order_date     DATE          NOT NULL,
-    ship_date      DATE,
-    order_status   VARCHAR(20)   NOT NULL
-);
-
-ALTER TABLE Bronze.sales_order
-    ADD CONSTRAINT PK_sales_order PRIMARY KEY NONCLUSTERED (order_id) NOT ENFORCED;
-
-ALTER TABLE Bronze.sales_order
-    ADD CONSTRAINT FK_sales_order_customer FOREIGN KEY (customer_id)
-    REFERENCES Bronze.customer (customer_id) NOT ENFORCED;
-
-
-CREATE TABLE Bronze.sales_order_line (
-    order_line_id  INT            NOT NULL,
-    order_id       INT            NOT NULL,
-    product_id     INT            NOT NULL,
-    quantity       SMALLINT       NOT NULL,
-    unit_price     DECIMAL(10, 2) NOT NULL,
-    discount_pct   DECIMAL(5, 2)  NOT NULL,
-    line_total     DECIMAL(10, 2) NOT NULL
-);
-
-ALTER TABLE Bronze.sales_order_line
-    ADD CONSTRAINT PK_sales_order_line PRIMARY KEY NONCLUSTERED (order_line_id) NOT ENFORCED;
-
-ALTER TABLE Bronze.sales_order_line
-    ADD CONSTRAINT FK_sol_order FOREIGN KEY (order_id)
-    REFERENCES Bronze.sales_order (order_id) NOT ENFORCED;
-
-ALTER TABLE Bronze.sales_order_line
-    ADD CONSTRAINT FK_sol_product FOREIGN KEY (product_id)
-    REFERENCES Bronze.product (product_id) NOT ENFORCED;
-
-
--- INSERT statements
--- Date range: 2022-01-01 to 2024-12-31
+GO
 
 INSERT INTO Bronze.sales_order (order_id, customer_id, order_date, ship_date, order_status) VALUES
     (1,   3,  '2022-01-08', '2022-01-11', 'Completed'),
@@ -202,6 +168,8 @@ INSERT INTO Bronze.sales_order (order_id, customer_id, order_date, ship_date, or
     (106, 9,  '2024-12-19', '2024-12-22', 'Completed'),
     (107, 6,  '2024-12-20', '2024-12-23', 'Completed'),
     (108, 1,  '2024-12-21', '2024-12-24', 'Completed');
+
+GO 
 
 INSERT INTO Bronze.sales_order_line (order_line_id, order_id, product_id, quantity, unit_price, discount_pct, line_total) VALUES
     (1,   1,  20, 1,  499.00, 0.00,  499.00),
