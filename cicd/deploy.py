@@ -12,9 +12,13 @@ from fabric_cicd import FabricWorkspace, publish_all_items, unpublish_all_orphan
 def main():
     parser = argparse.ArgumentParser(description="Deploy Fabric items to target workspace")
 
-    parser.add_argument("--tenant-id",       required=True, help="Azure Entra tenant ID")
-    parser.add_argument("--client-id",       required=True, help="Service Principal client ID")
-    parser.add_argument("--client-secret",   required=True, help="Service Principal client secret")
+    # Credentials are read from the environment by default. Passing them as
+    # command-line arguments works too, but env vars avoid two problems:
+    # a stray newline in a secret breaking shell line-continuation, and
+    # secrets appearing in the process list.
+    parser.add_argument("--tenant-id",       required=False, default=os.environ.get("AZURE_TENANT_ID", ""),     help="Azure Entra tenant ID")
+    parser.add_argument("--client-id",       required=False, default=os.environ.get("AZURE_CLIENT_ID", ""),     help="Service Principal client ID")
+    parser.add_argument("--client-secret",   required=False, default=os.environ.get("AZURE_CLIENT_SECRET", ""), help="Service Principal client secret")
     parser.add_argument("--target-env",      required=True, help="Target environment name (e.g. test)")
     parser.add_argument("--workspace-name",  required=True, help="Target Fabric workspace name")
     parser.add_argument("--git-directory",   required=True, help="Folder containing Fabric items (e.g. fabric)")
@@ -36,10 +40,28 @@ def main():
 
     items_in_scope = json.loads(args.items_in_scope)
 
+    tenant_id     = (args.tenant_id or "").strip()
+    client_id     = (args.client_id or "").strip()
+    client_secret = (args.client_secret or "").strip()
+
+    missing = [n for n, v in [
+        ("tenant-id / AZURE_TENANT_ID", tenant_id),
+        ("client-id / AZURE_CLIENT_ID", client_id),
+        ("client-secret / AZURE_CLIENT_SECRET", client_secret),
+    ] if not v]
+    if missing:
+        raise SystemExit(
+            "Missing credential values: " + ", ".join(missing) + ".\n"
+            "Set them as repository secrets in THIS repository and confirm the "
+            "workflow passes them through to this script."
+        )
+
+    print(f"Credential lengths : tenant={len(tenant_id)} client={len(client_id)} secret={len(client_secret)}")
+
     credential = ClientSecretCredential(
-        tenant_id=args.tenant_id,
-        client_id=args.client_id,
-        client_secret=args.client_secret,
+        tenant_id=tenant_id,
+        client_id=client_id,
+        client_secret=client_secret,
     )
 
     repo_root = Path(__file__).resolve().parent.parent
