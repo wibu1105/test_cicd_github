@@ -33,23 +33,18 @@ find_replace:
     item_type: "SemanticModel"
 
   # ------------------------------------------------------------------
-  # OPTIONAL — only needed if you have a Report item that connects to
-  # sales_semantic_model via "byConnection" (live/XMLA connection).
+  # Report items — nothing needed here.
   #
-  # Reports using "byPath" (same-workspace, the common case when you
-  # publish straight from Power BI Desktop) are re-pointed automatically
-  # by fabric-cicd — nothing to add for those.
+  # sales_report connects to sales_semantic_model via "byPath" (both live
+  # in the same workspace, the normal result of publishing from Power BI
+  # Desktop). fabric-cicd re-points byPath references automatically, the
+  # same way it resolves the pipeline's notebook reference.
   #
-  # byConnection always points at the DEV semantic model unless
-  # parameterized here. Uncomment and fill in your report's item name
-  # if this applies to you.
-  #
-  # - find_value: 'semanticmodelid=([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})'
-  #   is_regex: "true"
-  #   replace_value:
-  #     test: "$items.SemanticModel.sales_semantic_model.id"
-  #   item_type: "Report"
-  #   item_name: "your_report_name"
+  # An entry would only be required if a report ever switched to
+  # "byConnection" (live/XMLA, or a report in a different workspace to its
+  # model). The validate job in the workflow checks for that and fails the
+  # build if it happens, so this cannot break silently.
+  # ------------------------------------------------------------------
 
   # correctly for your model's exact TMDL formatting (e.g. line breaks
   # inside Sql.Database(...), or a different M expression shape).
