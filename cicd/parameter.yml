@@ -1,58 +1,36 @@
 find_replace:
-
-  # ==========================================================
-  # Semantic Model -> Warehouse connection
-  # ==========================================================
   - find_value: 'Sql\.Database\(("[a-z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com",\s*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"\)'
     is_regex: "true"
     replace_value:
       test: '"$items.Warehouse.insurance_WH.sqlendpoint", "$items.Warehouse.insurance_WH.id"'
     item_type: "SemanticModel"
 
-  # ==========================================================
-  # Notebook workspaceId
-  # ==========================================================
   - find_value: "YOUR_DEV_WORKSPACE_GUID"
     replace_value:
-      test: "$workspace.$id"
+      test: "$workspace.id"
     item_type: "Notebook"
 
-  # ==========================================================
-  # Notebook Lakehouse ID
-  # ==========================================================
   - find_value: "YOUR_DEV_LAKEHOUSE_GUID"
     replace_value:
-      test: "$items.Lakehouse.insurance_LH.$id"
+      test: "$items.Lakehouse.insurance_LH.id"
     item_type: "Notebook"
 
-  # ==========================================================
-  # Notebook SQL Endpoint ID
-  # ==========================================================
   - find_value: "YOUR_DEV_SQL_ENDPOINT_GUID"
     replace_value:
-      test: "$items.Lakehouse.insurance_LH.$sqlendpointid"
+      test: "$items.Lakehouse.insurance_LH.sqlendpointid"  # ⚠️ test kỹ, attribute này chưa được xác nhận ổn định
     item_type: "Notebook"
 
-  # ==========================================================
-  # Pipeline Notebook reference
-  # ==========================================================
   - find_value: "YOUR_DEV_NOTEBOOK_GUID"
     replace_value:
-      test: "$items.Notebook.load_insurance.$id"
+      test: "$items.Notebook.load_insurance.id"
     item_type: "DataPipeline"
 
-  # ==========================================================
-  # Pipeline Warehouse reference
-  # ==========================================================
   - find_value: "YOUR_DEV_WAREHOUSE_GUID"
     replace_value:
-      test: "$items.Warehouse.insurance_WH.$id"
+      test: "$items.Warehouse.insurance_WH.id"
     item_type: "DataPipeline"
 
-  # ==========================================================
-  # Pipeline Lakehouse reference
-  # ==========================================================
   - find_value: "YOUR_DEV_LAKEHOUSE_GUID"
     replace_value:
-      test: "$items.Lakehouse.insurance_LH.$id"
+      test: "$items.Lakehouse.insurance_LH.id"
     item_type: "DataPipeline"
