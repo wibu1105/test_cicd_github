@@ -7,7 +7,8 @@ CREATE TABLE [Bronze].[customer] (
 	[phone] varchar(30) NULL, 
 	[date_of_birth] date NULL, 
 	[address_id] int NOT NULL, 
-	[created_at] datetime2(0) NOT NULL
+	[created_at] datetime2(0) NOT NULL, 
+	[is_vip] bit NULL
 );
 
 
