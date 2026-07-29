@@ -1,0 +1,1 @@
+select * from Gold.dim_customer;
