@@ -1,26 +1,31 @@
-find_replace:
+key_value_replace:
 
-  # Workspace ID
-  - find_value: "20d6e797-9f3e-4e0a-a291-0789bdb1b623"
+  # ------------------------------------------------------------------
+  # DataPipeline pl_silver -> notebook activity "Notebook1"
+  #
+  # The activity name below MUST match the "name" field of the notebook
+  # activity in pipeline-content.json. Yours is "Notebook1".
+  # ------------------------------------------------------------------
+  - find_key: $.properties.activities[?(@.name=="Notebook1")].typeProperties.notebookId
     replace_value:
-      test: "$workspace.$id"
-
-  # Notebook ID
-  - find_value: "e46c6022-a4b4-4510-873e-e14bf66221d3"
-    replace_value:
-      test: "$items.Notebook.nb_transform.$id"
+      test: "$items.Notebook.nb_transform.id"
     item_type: "DataPipeline"
 
- 
-
-  # Warehouse ID
-  - find_value: "5e59288a-8c37-41e0-985f-9791bffd60c6"
+  - find_key: $.properties.activities[?(@.name=="Notebook1")].typeProperties.workspaceId
     replace_value:
-      test: "$items.Warehouse.insurance_WH.$id"
+      test: "$workspace.id"
+    item_type: "DataPipeline"
 
-  # Semantic Model - Warehouse connection
+find_replace:
+
+  # ------------------------------------------------------------------
+  # Semantic model sales_semantic_model -> warehouse connection.
+  # Captures hostname + database GUID as one group; replaces with both
+  # dynamic tokens together. Resolved against insurance_WH in the target
+  # workspace at deploy time.
+  # ------------------------------------------------------------------
   - find_value: 'Sql\.Database\(("[a-z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com",\s*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"\)'
     is_regex: "true"
     replace_value:
-      test: '"$items.Warehouse.insurance_WH.$sqlendpoint", "$items.Warehouse.insurance_WH.$id"'
+      test: '"$items.Warehouse.insurance_WH.sqlendpoint", "$items.Warehouse.insurance_WH.id"'
     item_type: "SemanticModel"
