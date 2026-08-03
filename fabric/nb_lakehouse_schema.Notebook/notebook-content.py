@@ -8,11 +8,12 @@
 # META   },
 # META   "dependencies": {
 # META     "lakehouse": {
-# META       "default_lakehouse": "f28bbe6d-0dd5-92eb-450f-1444b55ebcb9",
+# META       "default_lakehouse": "b55ebcb9-1444-450f-92eb-0dd5f28bbe6d",
 # META       "default_lakehouse_name": "test_LH",
+# META       "default_lakehouse_workspace_id": "20d6e797-9f3e-4e0a-a291-0789bdb1b623",
 # META       "known_lakehouses": [
 # META         {
-# META           "id": "f28bbe6d-0dd5-92eb-450f-1444b55ebcb9"
+# META           "id": "b55ebcb9-1444-450f-92eb-0dd5f28bbe6d"
 # META         }
 # META       ]
 # META     }
@@ -27,16 +28,19 @@
 # Lakehouse item is published — the Lakehouse equivalent of the dacpac publish
 # on the warehouse side.
 #
-# The GUID in `default_lakehouse` above is the **logicalId** from
-# `fabric/test_LH.Lakehouse/.platform`, not a workspace-specific item id. That
-# is the same thing `nb_transform` does with `insurance_WH`: the logicalId is
-# the repo-level identity of the item, and Fabric resolves it to whichever real
-# lakehouse carries that logicalId in the workspace being deployed to. So one
-# file attaches correctly in dev and in test, with no `parameter.yml` rule and
-# nothing to re-pin by hand.
+# The GUIDs above are the **dev** lakehouse and workspace, exactly as Fabric
+# writes them when the lakehouse is attached in the UI. They do not stay dev
+# values after deploy: `cicd/parameter.yml` rewrites both to `$items.Lakehouse.
+# test_LH.id` and `$workspace.id`, so the notebook attaches to the target
+# workspace's own lakehouse.
 #
-# Note there is deliberately no `default_lakehouse_workspace_id` — pinning one
-# would send every environment back to the workspace this was authored in.
+# Two things this block cannot do without:
+#
+# - `default_lakehouse_workspace_id` is **required**. Omit it and the job fails
+#   with `LakehouseWorkspaceId is not a valid GUID:` (empty). The `warehouse`
+#   block in `nb_transform` has no such field — the two are not symmetric.
+# - `default_lakehouse` must be the lakehouse's **item id**, not the `logicalId`
+#   in `.platform`. Those two are different GUIDs for the same item.
 #
 # Every statement is idempotent: this runs on every lakehouse deploy, not only
 # when a table is added.

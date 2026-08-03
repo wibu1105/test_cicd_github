@@ -333,17 +333,19 @@ RESOLVE_BY_NAME = (
     "lakehouse.get(",           # lakehouse, resolved via notebookutils
 )
 
-# A notebook attaches its store by writing that store's GUID into the metadata
-# header. Which GUID decides whether the notebook is portable:
-#   - the item's logicalId (from its .platform) is the repo-level identity, and
-#     Fabric maps it to whichever real item carries it in the target workspace
-#   - any other GUID is a workspace-specific item id and will keep pointing at
-#     the workspace the notebook was authored in
-DEFAULT_STORE_RE = re.compile(
-    r'"default_(?:lakehouse|warehouse)"\s*:\s*"([0-9a-fA-F-]{36})"')
-# Pins the notebook to one workspace, defeating the logicalId indirection.
-STORE_WORKSPACE_RE = re.compile(
-    r'"default_(?:lakehouse|warehouse)_workspace_id"\s*:\s*"([0-9a-fA-F-]{36})"')
+# A notebook attaches its store by writing GUIDs into its METADATA header. Those
+# GUIDs are environment-specific, so each one has to be either:
+#   - the item's logicalId from its .platform, which Fabric maps to whichever
+#     real item carries it in the target workspace (what nb_transform does), or
+#   - covered by a find_replace rule in parameter.yml, which rewrites it at
+#     publish time (what nb_lakehouse_schema does)
+# Anything else deploys cleanly and then reads or writes the wrong workspace.
+#
+# The two store types are not symmetric: a lakehouse block also requires
+# default_lakehouse_workspace_id, and omitting it fails the job outright with
+# "LakehouseWorkspaceId is not a valid GUID:".
+ATTACHED_GUID_RE = re.compile(
+    r'"(default_(?:lakehouse|warehouse)(?:_workspace_id)?)"\s*:\s*"([0-9a-fA-F-]{36})"')
 
 
 def repo_logical_ids():
@@ -360,7 +362,7 @@ def repo_logical_ids():
     return ids
 
 
-def check_notebooks(rep):
+def check_notebooks(rep, entries, target_env):
     print("\n[6] Notebook portability")
 
     if not FABRIC_DIR.is_dir():
@@ -390,32 +392,23 @@ def check_notebooks(rep):
                 file=str(f))
             continue
 
-        workspace_pin = STORE_WORKSPACE_RE.search(text)
-        if workspace_pin:
-            rep.error(
-                "notebook",
-                f"{name} pins default_..._workspace_id ({workspace_pin.group(1)}). "
-                f"That sends every environment back to the workspace this was "
-                f"authored in. Drop the key — without it the store resolves in "
-                f"whichever workspace the notebook runs in.",
-                file=str(f))
-            continue
-
-        attached = DEFAULT_STORE_RE.search(text)
+        attached = ATTACHED_GUID_RE.findall(text)
         if attached:
-            guid = attached.group(1)
-            owner = logical_ids.get(guid)
-            if owner:
-                rep.ok(f"{name} attaches {owner} by logicalId")
-            else:
-                rep.error(
-                    "notebook",
-                    f"{name} attaches a store by GUID {guid}, which is not the "
-                    f"logicalId of any item in {FABRIC_DIR}/. That makes it a "
-                    f"workspace-specific item id, so after deploy the notebook "
-                    f"would still read the workspace it was authored in. Use the "
-                    f"logicalId from the item's .platform file instead.",
-                    file=str(f))
+            for key, guid in attached:
+                owner = logical_ids.get(guid)
+                if owner:
+                    rep.ok(f"{name}: {key} is {owner}'s logicalId")
+                elif any(entry_matches(e, guid) for e in entries):
+                    rep.ok(f"{name}: {key} is rewritten by parameter.yml")
+                else:
+                    rep.error(
+                        "notebook",
+                        f"{name} sets {key} to {guid}, which is neither the "
+                        f"logicalId of an item in {FABRIC_DIR}/ nor covered by a "
+                        f"find_replace rule in parameter.yml for '{target_env}'. "
+                        f"After deploy this notebook would still attach to the "
+                        f"workspace it was authored in.",
+                        file=str(f))
             continue
 
         if any(marker in text for marker in RESOLVE_BY_NAME):
@@ -489,7 +482,7 @@ def main():
     check_tsql_batches(rep)
     entries, _ = load_parameter_file(rep, args.target_env)
     check_parameterisation_coverage(rep, entries, args.target_env)
-    check_notebooks(rep)
+    check_notebooks(rep, entries, args.target_env)
     check_reports(rep, entries)
 
     sys.exit(rep.summary())

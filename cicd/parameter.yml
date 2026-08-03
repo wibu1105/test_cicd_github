@@ -29,3 +29,25 @@ find_replace:
     replace_value:
       test: '"$items.Warehouse.insurance_WH.sqlendpoint", "$items.Warehouse.insurance_WH.id"'
     item_type: "SemanticModel"
+
+  # ------------------------------------------------------------------
+  # nb_lakehouse_schema -> attached lakehouse.
+  #
+  # A notebook's METADATA header stores the lakehouse it is attached to as the
+  # dev workspace's item id plus that workspace's id. Both have to be rewritten,
+  # or the notebook deploys cleanly and then writes its schema into the dev
+  # lakehouse. The lakehouse id appears twice (default_lakehouse and
+  # known_lakehouses) — a literal find_replace rewrites every occurrence.
+  #
+  # Note this is the item id, NOT the logicalId in test_LH.Lakehouse/.platform;
+  # those are two different GUIDs for the same item.
+  # ------------------------------------------------------------------
+  - find_value: "b55ebcb9-1444-450f-92eb-0dd5f28bbe6d"
+    replace_value:
+      test: "$items.Lakehouse.test_LH.id"
+    item_type: "Notebook"
+
+  - find_value: "20d6e797-9f3e-4e0a-a291-0789bdb1b623"
+    replace_value:
+      test: "$workspace.id"
+    item_type: "Notebook"
