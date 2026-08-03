@@ -39,9 +39,9 @@ find_replace:
   # — the rule just stops matching and the notebook deploys still pointing at the
   # workspace it came from.
   #
-  # cicd/resolve_ids.py generates those rules at deploy time instead: it reads
-  # each notebook header, pairs the GUID with the store *name* Fabric wrote next
-  # to it, and emits find_value: <guid> -> $items.<Type>.<name>.id. Recreate a
-  # lakehouse as often as you like; as long as the name holds, the rule is
-  # regenerated correctly on the next run.
+  # cicd/resolve_ids.py generates those rules at deploy time instead: it lists
+  # the source workspace over the Fabric REST API and emits, for every lakehouse
+  # and warehouse it finds, find_value: <live id> -> $items.<Type>.<name>.id.
+  # Recreate a lakehouse as often as you like; as long as the name holds, the
+  # next run reads the new id straight from Fabric.
   # ------------------------------------------------------------------

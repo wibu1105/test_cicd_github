@@ -223,10 +223,8 @@ jobs:
         run: |
           python cicd/resolve_ids.py \
             --target-env "${{ env.TARGET_ENV }}" \
-            --git-directory "${{ steps.gitdir.outputs.gitdir }}" \
-            --parameter-file "${{ steps.gitdir.outputs.gitdir }}/parameter.yml" \
-            --verify \
-            --workspace-id "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}"
+            --source-workspace-id "${{ vars.SOURCE_WORKSPACE_ID }}" \
+            --parameter-file "${{ steps.gitdir.outputs.gitdir }}/parameter.yml"
 
       # ----------------------------------------------------------------
       # Phase 1 — Deploy Fabric items (Sử dụng credentials vừa kéo ra)

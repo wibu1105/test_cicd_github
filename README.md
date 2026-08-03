@@ -202,6 +202,13 @@ dài trong luồng này — không phải "zero secrets" như một số tài li
 **Variables** (theo từng environment, vd `test`): `<ENV>_WORKSPACE_NAME`,
 `<ENV>_WORKSPACE_ID`, có thể thêm `GIT_DIRECTORY` (mặc định `fabric`).
 
+**`SOURCE_WORKSPACE_ID`** (biến cấp repo, không theo environment): id của
+workspace **dev** — nơi notebook được soạn và Git sync đẩy về repo.
+`cicd/resolve_ids.py` gọi Fabric REST API vào workspace này để lấy id hiện tại
+của từng Lakehouse/Warehouse, rồi sinh rule `find_replace` ánh xạ sang
+`$items.<Type>.<name>.id`. Nhờ vậy `parameter.yml` không phải giữ GUID nào —
+xoá/tạo lại Lakehouse ở dev thoải mái, miễn giữ nguyên tên.
+
 ## Lỗi đã biết (chưa sửa, cẩn thận khi đụng vào)
 
 - `nb_transform`: `DELETE` + `INSERT` vào Gold không có transaction — người đọc có
