@@ -17,7 +17,8 @@ CREATE TABLE [Gold].[dim_customer] (
 	[postal_code] varchar(20) NOT NULL, 
 	[effective_from] date NOT NULL, 
 	[effective_to] date NULL, 
-	[is_current] smallint NOT NULL
+	[is_current] smallint NOT NULL,
+	[email_domain] varchar(255) NULL
 );
 
 

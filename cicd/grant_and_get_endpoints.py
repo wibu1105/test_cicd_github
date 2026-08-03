@@ -16,10 +16,9 @@
 
 import argparse
 import os
-import sys
 
-import requests
 import pyodbc
+import requests
 from azure.identity import ClientSecretCredential
 
 

@@ -50,8 +50,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install PyYAML
-        run: pip install pyyaml
+      - name: Install PyYAML and ruff
+        run: pip install pyyaml ruff
 
       - name: Validate repository
         run: |
@@ -59,6 +59,11 @@ jobs:
           # workflow validates prod pull requests correctly once that branch
           # exists.
           python cicd/validate_repo.py --target-env "${{ github.base_ref }}"
+
+      - name: Lint deployment scripts
+        # Style and dead code that the ast.parse check in validate_repo.py
+        # cannot see.
+        run: ruff check --output-format=github cicd/
 
   # ====================================================================
   # Build the dacpac — proves the warehouse project actually compiles
@@ -139,7 +144,7 @@ jobs:
             echo ""
             echo "| Check | Result |"
             echo "|---|---|"
-            echo "| Static repository checks | ${{ needs.static_checks.result }} |"
+            echo "| Static repository checks + ruff lint | ${{ needs.static_checks.result }} |"
             echo "| Warehouse dacpac build | ${{ needs.build_dacpac.result }} |"
             echo ""
             echo "Merging into \`${{ github.base_ref }}\` triggers the deployment workflow."

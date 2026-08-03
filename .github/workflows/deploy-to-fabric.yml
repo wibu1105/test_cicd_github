@@ -7,12 +7,18 @@ on:
     branches:
       - test
       # Add "- prod" here once a prod branch/workspace/environment exist.
+    paths-ignore:
+      # Warehouse and Lakehouse have their own pipelines. Without these, a push
+      # touching warehouse files would trigger this workflow as well and publish
+      # the same schema twice in one push.
+      - 'fabric/**/*.Warehouse/**'
+      - 'fabric/**/*.Lakehouse/**'
   workflow_dispatch:
     inputs:
       items_in_scope:
         description: "Fabric item types to deploy (JSON array)"
         required: false
-        default: '["Notebook","DataPipeline","Warehouse","SemanticModel","Report"]'
+        default: '["Notebook","DataPipeline","SemanticModel","Report"]'
       unpublish_orphans:
         description: "Delete items in the workspace that are no longer in the repo"
         required: false
@@ -155,23 +161,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Set up .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.x"
-
-      - name: Install ODBC Driver 18 for SQL Server
-        run: |
-          sudo apt-get update
-          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
-
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r cicd/requirements.txt
-
-      - name: Install SqlPackage
-        run: dotnet tool install --global microsoft.sqlpackage
 
       - name: Resolve repository directory
         id: gitdir
@@ -232,60 +225,25 @@ jobs:
             --target-env     "${{ env.TARGET_ENV }}" \
             --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
             --git-directory  "${{ steps.gitdir.outputs.gitdir }}" \
-            --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"Warehouse\",\"SemanticModel\",\"Report\"]' }}" \
+            --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"SemanticModel\",\"Report\"]' }}" \
             --unpublish-orphans "${{ github.event.inputs.unpublish_orphans || 'true' }}"
 
-      # ----------------------------------------------------------------
-      # Phase 2 — Get endpoints
-      # ----------------------------------------------------------------
-      - name: Phase 2 - Get SQL endpoint
-        env:
-          AZURE_TENANT_ID: ${{ env.DEPLOY_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ env.DEPLOY_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ env.DEPLOY_CLIENT_SECRET }}
-        run: |
-          python cicd/grant_and_get_endpoints.py \
-            --workspace-id    "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
-            --warehouse-names "insurance_WH"
-
-      - name: Verify endpoint was resolved
-        run: |
-          if [ -z "${{ env.INSURANCE_WH_ENDPOINT }}" ]; then
-            echo "::error::INSURANCE_WH_ENDPOINT is empty."
-            exit 1
-          fi
-
-      - name: Pin .NET SDK to 8.x for sqlproj compatibility
-        run: echo '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' > global.json
-
-      # ----------------------------------------------------------------
-      # Phase 3 — Build and Publish Dacpac
-      # ----------------------------------------------------------------
-      - name: Phase 3a - Build insurance_WH dacpac
-        run: |
-          dotnet build fabric/insurance_WH.Warehouse/insurance_WH.sqlproj \
-            --configuration Release \
-            --output .dacpac/insurance_WH
-
-      - name: Phase 3b - Publish schemas (Sử dụng credentials từ KeyVault)
-        run: |
-          sqlpackage /Action:Publish \
-            /SourceFile:".dacpac/insurance_WH/insurance_WH.dacpac" \
-            /TargetConnectionString:"Server=tcp:${{ env.INSURANCE_WH_ENDPOINT }},1433;Initial Catalog=insurance_WH;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;Authentication=Active Directory Service Principal;User Id=${{ env.DEPLOY_CLIENT_ID }};Password=${{ env.DEPLOY_CLIENT_SECRET }}" \
-            /p:AllowIncompatiblePlatform=true \
-            /p:DropObjectsNotInSource=false
+      # Warehouse endpoint resolution and dacpac publish used to live here.
+      # They now belong to deploy-warehouse.yml — keeping them in both places
+      # published the same schema twice on a single push.
 
       - name: Deployment summary
         if: always()
         run: |
           {
-            echo "### Fabric deployment (Zero Secrets Architecture) 🚀"
+            echo "### Fabric deployment — Notebook / DataPipeline / SemanticModel / Report"
             echo ""
             echo "| Setting | Value |"
             echo "|---|---|"
             echo "| Workspace | \`${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}\` |"
-            echo "| Warehouse | \`insurance_WH\` (Bronze + Gold) |"
             echo "| Commit | \`${{ github.sha }}\` |"
+            echo ""
+            echo "Warehouse is deployed by \`deploy-warehouse.yml\`, Lakehouse by \`deploy-lakehouse.yml\`."
             echo ""
             echo "**Manual steps still required:**"
             echo "- Ensure Deploy SP is manually added to the Workspace Access."

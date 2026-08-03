@@ -196,7 +196,10 @@ SELECT
     a.postal_code,
     CAST('2022-01-01' AS DATE),
     NULL,
-    CAST(1 AS SMALLINT)
+    CAST(1 AS SMALLINT),
+    CASE WHEN c.email LIKE '%@%'
+         THEN LOWER(SUBSTRING(c.email, CHARINDEX('@', c.email) + 1, LEN(c.email)))
+    END
 FROM       Bronze.customer  c
 INNER JOIN Bronze.address   a  ON a.address_id  = c.address_id
 INNER JOIN Bronze.city      ci ON ci.city_id    = a.city_id
