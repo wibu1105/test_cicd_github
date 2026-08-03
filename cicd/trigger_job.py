@@ -15,10 +15,27 @@ import time
 
 import requests
 from azure.identity import ClientSecretCredential
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 API = "https://api.fabric.microsoft.com/v1"
 JOB_TYPES = {"DataPipeline": "Pipeline", "Notebook": "RunNotebook"}
 FAILED = {"Failed", "Cancelled", "Deduped"}
+
+
+def build_session() -> requests.Session:
+    """Retries transient failures (429/5xx, connection resets) with backoff.
+    A CI run that fails because Fabric hiccupped for one request is a worse
+    outcome than a few seconds of extra wait."""
+    session = requests.Session()
+    retry = Retry(
+        total=5,
+        backoff_factor=2,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "POST"],
+    )
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    return session
 
 
 def main():
@@ -31,6 +48,8 @@ def main():
     p.add_argument("--item-type", required=True, choices=sorted(JOB_TYPES))
     p.add_argument("--wait", action="store_true")
     p.add_argument("--timeout-minutes", type=int, default=60)
+    p.add_argument("--skip-if-missing", action="store_true",
+                   help="Exit 0 instead of failing when the item does not exist yet")
     args = p.parse_args()
 
     creds = {k: (getattr(args, k) or "").strip()
@@ -45,8 +64,9 @@ def main():
         client_secret=creds["client_secret"],
     ).get_token("https://api.fabric.microsoft.com/.default").token
     headers = {"Authorization": f"Bearer {token}"}
+    session = build_session()
 
-    items = requests.get(
+    items = session.get(
         f"{API}/workspaces/{args.workspace_id}/items",
         headers=headers, params={"type": args.item_type}, timeout=60,
     )
@@ -54,13 +74,15 @@ def main():
     match = next((i for i in items.json().get("value", [])
                   if i.get("displayName") == args.item_name), None)
     if not match:
-        raise SystemExit(
-            f"No {args.item_type} named '{args.item_name}' in workspace {args.workspace_id}"
-        )
+        message = f"No {args.item_type} named '{args.item_name}' in workspace {args.workspace_id}"
+        if args.skip_if_missing:
+            print(f"::notice::{message}. Skipped.")
+            return
+        raise SystemExit(message)
 
     job_type = JOB_TYPES[args.item_type]
     print(f"Starting {args.item_type} '{args.item_name}' (jobType={job_type})")
-    started = requests.post(
+    started = session.post(
         f"{API}/workspaces/{args.workspace_id}/items/{match['id']}/jobs/instances",
         headers=headers, params={"jobType": job_type}, json={}, timeout=60,
     )
@@ -77,7 +99,9 @@ def main():
     deadline = time.time() + args.timeout_minutes * 60
     last = ""
     while time.time() < deadline:
-        body = requests.get(instance, headers=headers, timeout=60).json()
+        poll = session.get(instance, headers=headers, timeout=60)
+        poll.raise_for_status()
+        body = poll.json()
         status = body.get("status", "Unknown")
         if status != last:
             print(f"  {status}")

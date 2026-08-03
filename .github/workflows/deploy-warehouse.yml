@@ -24,8 +24,28 @@ env:
   POPULATE_PROC: Gold.usp_populate_new_columns
 
 jobs:
+  # Cùng vai trò với job validate của deploy-to-fabric.yml: chặn deploy nếu repo
+  # sai cấu trúc. Không gọi Fabric, không dùng secret nên chạy nhanh và rẻ.
+  validate:
+    name: Validate repository structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyyaml
+
+      - name: Validate repository
+        run: python cicd/validate_repo.py --target-env "$TARGET_ENV"
+
   deploy:
     name: Publish warehouse schema
+    needs: validate
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name }}
     timeout-minutes: 40

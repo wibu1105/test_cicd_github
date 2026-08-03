@@ -29,10 +29,31 @@ concurrency:
 env:
   TARGET_ENV: ${{ github.ref_name }}
   RUN_JOB: ${{ inputs.run_job }}
+  SCHEMA_NOTEBOOK: nb_lakehouse_schema
 
 jobs:
+  # Cùng vai trò với job validate của deploy-to-fabric.yml: chặn deploy nếu repo
+  # sai cấu trúc. Không gọi Fabric, không dùng secret nên chạy nhanh và rẻ.
+  validate:
+    name: Validate repository structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyyaml
+
+      - name: Validate repository
+        run: python cicd/validate_repo.py --target-env "$TARGET_ENV"
+
   deploy:
     name: Publish lakehouse items
+    needs: validate
     runs-on: ubuntu-latest
     environment: ${{ github.ref_name }}
     timeout-minutes: 60
@@ -74,6 +95,20 @@ jobs:
             --items-in-scope '["Lakehouse"]' \
             --unpublish-orphans false
 
+      # Tương đương bước "Publish schema" của Warehouse: chạy lại notebook khai
+      # báo schema mỗi lần pipeline này chạy. --skip-if-missing để không fail
+      # khi notebook chưa được tạo/deploy (deploy-to-fabric.yml mới là chỗ
+      # publish item Notebook này).
+      - name: Apply lakehouse schema
+        run: |
+          python cicd/trigger_job.py \
+            --workspace-id "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
+            --item-name "$SCHEMA_NOTEBOOK" \
+            --item-type Notebook \
+            --wait \
+            --timeout-minutes 20 \
+            --skip-if-missing
+
       - name: Run post-deploy job
         if: ${{ inputs.run_job != '' }}
         run: |
@@ -82,3 +117,17 @@ jobs:
             --item-name "${RUN_JOB%%:*}" \
             --item-type "${RUN_JOB##*:}" \
             --wait
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "### Lakehouse deployment"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            echo "| Environment | \`${TARGET_ENV}\` |"
+            echo "| Schema notebook | \`${SCHEMA_NOTEBOOK}\` |"
+            echo "| Post-deploy job | \`${RUN_JOB:-none}\` |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
