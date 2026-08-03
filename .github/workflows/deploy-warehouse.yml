@@ -24,15 +24,11 @@ concurrency:
 env:
   TARGET_ENV: ${{ github.ref_name }}
   WAREHOUSE: insurance_WH
-  # Chạy theo đúng thứ tự này. Bronze trước Gold vì Gold đọc dữ liệu từ Bronze.
-  # Thêm bảng/schema mới cần backfill thì thêm tên proc vào cuối danh sách.
   POPULATE_PROCS: >-
     Bronze.usp_populate_new_columns
     Gold.usp_populate_new_columns
 
 jobs:
-  # Cùng vai trò với job validate của deploy-to-fabric.yml: chặn deploy nếu repo
-  # sai cấu trúc. Không gọi Fabric, không dùng secret nên chạy nhanh và rẻ.
   validate:
     name: Validate repository structure
     runs-on: ubuntu-latest
