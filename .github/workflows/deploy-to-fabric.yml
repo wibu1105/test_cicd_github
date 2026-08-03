@@ -212,6 +212,22 @@ jobs:
           echo "DEPLOY_CLIENT_ID=$DEPLOY_CLIENT_ID" >> $GITHUB_ENV
           echo "DEPLOY_CLIENT_SECRET=$DEPLOY_CLIENT_SECRET" >> $GITHUB_ENV
 
+      # This is the only workflow that publishes Notebook items, so it is the
+      # only one where repointing their attached lakehouse/warehouse has any
+      # effect — find_replace only applies to items being published.
+      - name: Resolve attached-store ids into parameter.yml
+        env:
+          AZURE_TENANT_ID: ${{ env.DEPLOY_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ env.DEPLOY_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ env.DEPLOY_CLIENT_SECRET }}
+        run: |
+          python cicd/resolve_ids.py \
+            --target-env "${{ env.TARGET_ENV }}" \
+            --git-directory "${{ steps.gitdir.outputs.gitdir }}" \
+            --parameter-file "${{ steps.gitdir.outputs.gitdir }}/parameter.yml" \
+            --verify \
+            --workspace-id "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}"
+
       # ----------------------------------------------------------------
       # Phase 1 — Deploy Fabric items (Sử dụng credentials vừa kéo ra)
       # ----------------------------------------------------------------

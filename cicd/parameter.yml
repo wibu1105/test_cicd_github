@@ -31,23 +31,17 @@ find_replace:
     item_type: "SemanticModel"
 
   # ------------------------------------------------------------------
-  # nb_lakehouse_schema -> attached lakehouse.
+  # Notebooks that attach a lakehouse or warehouse are NOT listed here.
   #
-  # A notebook's METADATA header stores the lakehouse it is attached to as the
-  # dev workspace's item id plus that workspace's id. Both have to be rewritten,
-  # or the notebook deploys cleanly and then writes its schema into the dev
-  # lakehouse. The lakehouse id appears twice (default_lakehouse and
-  # known_lakehouses) — a literal find_replace rewrites every occurrence.
+  # Their headers carry the source workspace's item id and workspace id, which
+  # change whenever a store is recreated. Writing those GUIDs down here means
+  # updating this file every time that happens, and a stale entry fails silently
+  # — the rule just stops matching and the notebook deploys still pointing at the
+  # workspace it came from.
   #
-  # Note this is the item id, NOT the logicalId in test_LH.Lakehouse/.platform;
-  # those are two different GUIDs for the same item.
+  # cicd/resolve_ids.py generates those rules at deploy time instead: it reads
+  # each notebook header, pairs the GUID with the store *name* Fabric wrote next
+  # to it, and emits find_value: <guid> -> $items.<Type>.<name>.id. Recreate a
+  # lakehouse as often as you like; as long as the name holds, the rule is
+  # regenerated correctly on the next run.
   # ------------------------------------------------------------------
-  - find_value: "b55ebcb9-1444-450f-92eb-0dd5f28bbe6d"
-    replace_value:
-      test: "$items.Lakehouse.test_LH.id"
-    item_type: "Notebook"
-
-  - find_value: "20d6e797-9f3e-4e0a-a291-0789bdb1b623"
-    replace_value:
-      test: "$workspace.id"
-    item_type: "Notebook"
