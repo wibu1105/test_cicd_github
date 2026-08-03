@@ -9,7 +9,8 @@ on:
   push:
     branches: [test]
     paths:
-      - 'fabric/**/*.Lakehouse/**'
+      # See deploy-warehouse.yml for why this is not 'fabric/**/*.Lakehouse/**'.
+      - 'fabric/*.Lakehouse/**'
   workflow_dispatch:
     inputs:
       run_job:

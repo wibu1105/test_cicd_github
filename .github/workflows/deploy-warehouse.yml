@@ -7,7 +7,10 @@ on:
   push:
     branches: [test]
     paths:
-      - 'fabric/**/*.Warehouse/**'
+      # Not 'fabric/**/*.Warehouse/**' — GitHub's '**' is a character wildcard,
+      # so '**/' still needs a literal '/', which would require the item to sit
+      # two levels deep. Fabric items live directly under fabric/.
+      - 'fabric/*.Warehouse/**'
   workflow_dispatch:
 
 permissions:

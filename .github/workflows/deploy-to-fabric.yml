@@ -8,11 +8,11 @@ on:
       - test
       # Add "- prod" here once a prod branch/workspace/environment exist.
     paths-ignore:
-      # Warehouse and Lakehouse have their own pipelines. Without these, a push
-      # touching warehouse files would trigger this workflow as well and publish
-      # the same schema twice in one push.
-      - 'fabric/**/*.Warehouse/**'
-      - 'fabric/**/*.Lakehouse/**'
+      # Warehouse and Lakehouse have their own pipelines. Note paths-ignore only
+      # skips the run when EVERY changed file matches, so a push mixing warehouse
+      # SQL with cicd/ or docs/ changes still runs this workflow — by design.
+      - 'fabric/*.Warehouse/**'
+      - 'fabric/*.Lakehouse/**'
   workflow_dispatch:
     inputs:
       items_in_scope:
