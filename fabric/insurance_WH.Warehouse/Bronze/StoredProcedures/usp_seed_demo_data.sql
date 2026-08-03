@@ -55,17 +55,17 @@ BEGIN
         (9,  '980 Granville St',   'Unit 5',    'V6Z1L3',  9),
         (10, '42 Baker Street',    NULL,        'NW1 6XE', 10);
 
-    INSERT INTO Bronze.customer (customer_id, first_name, last_name, email, phone, date_of_birth, address_id, created_at) VALUES
-        (1,  'James',   'Anderson',  'james.anderson@email.com',  '+1-310-555-0101', '1985-03-14', 1,  '2024-01-15 08:30:00'),
-        (2,  'Sarah',   'Mitchell',  'sarah.mitchell@email.com',  '+1-415-555-0182', '1990-07-22', 2,  '2024-01-22 11:15:00'),
-        (3,  'Carlos',  'Rivera',    'carlos.rivera@email.com',   '+1-713-555-0143', '1978-11-05', 3,  '2024-02-03 09:45:00'),
-        (4,  'Emily',   'Chen',      'emily.chen@email.com',      '+1-512-555-0167', '1995-01-30', 4,  '2024-02-18 14:00:00'),
-        (5,  'Michael', 'Okafor',    'michael.okafor@email.com',  '+1-212-555-0134', '1982-09-18', 5,  '2024-03-05 10:30:00'),
-        (6,  'Laura',   'Fernandez', 'laura.fernandez@email.com', '+1-305-555-0121', '1993-04-25', 6,  '2024-03-12 16:20:00'),
-        (7,  'David',   'Park',      'david.park@email.com',      '+1-312-555-0198', '1988-12-03', 7,  '2024-04-01 08:00:00'),
-        (8,  'Priya',   'Sharma',    'priya.sharma@email.com',    '+1-416-555-0155', '1991-06-11', 8,  '2024-04-14 13:45:00'),
-        (9,  'Liam',    'Tremblay',  'liam.tremblay@email.com',   '+1-604-555-0177', '1987-02-28', 9,  '2024-05-02 09:10:00'),
-        (10, 'Sophie',  'Williams',  'sophie.williams@email.com', '+44-20-5550-0162','1996-08-09', 10, '2024-05-20 11:55:00');
+    INSERT INTO Bronze.customer (customer_id, first_name, last_name, email, phone, date_of_birth, address_id, created_at, loyalty_signup_channel) VALUES
+        (1,  'James',   'Anderson',  'james.anderson@email.com',  '+1-310-555-0101', '1985-03-14', 1,  '2024-01-15 08:30:00', 'web'),
+        (2,  'Sarah',   'Mitchell',  'sarah.mitchell@email.com',  '+1-415-555-0182', '1990-07-22', 2,  '2024-01-22 11:15:00', 'mobile'),
+        (3,  'Carlos',  'Rivera',    'carlos.rivera@email.com',   '+1-713-555-0143', '1978-11-05', 3,  '2024-02-03 09:45:00', 'store'),
+        (4,  'Emily',   'Chen',      'emily.chen@email.com',      '+1-512-555-0167', '1995-01-30', 4,  '2024-02-18 14:00:00', 'web'),
+        (5,  'Michael', 'Okafor',    'michael.okafor@email.com',  '+1-212-555-0134', '1982-09-18', 5,  '2024-03-05 10:30:00', 'partner'),
+        (6,  'Laura',   'Fernandez', 'laura.fernandez@email.com', '+1-305-555-0121', '1993-04-25', 6,  '2024-03-12 16:20:00', 'mobile'),
+        (7,  'David',   'Park',      'david.park@email.com',      '+1-312-555-0198', '1988-12-03', 7,  '2024-04-01 08:00:00', 'web'),
+        (8,  'Priya',   'Sharma',    'priya.sharma@email.com',    '+1-416-555-0155', '1991-06-11', 8,  '2024-04-14 13:45:00', 'store'),
+        (9,  'Liam',    'Tremblay',  'liam.tremblay@email.com',   '+1-604-555-0177', '1987-02-28', 9,  '2024-05-02 09:10:00', 'mobile'),
+        (10, 'Sophie',  'Williams',  'sophie.williams@email.com', '+44-20-5550-0162','1996-08-09', 10, '2024-05-20 11:55:00', 'partner');
 
     -- ------------------------------------------------------------------
     -- Product catalog
