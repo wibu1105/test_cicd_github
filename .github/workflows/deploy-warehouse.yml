@@ -21,7 +21,11 @@ concurrency:
 env:
   TARGET_ENV: ${{ github.ref_name }}
   WAREHOUSE: insurance_WH
-  POPULATE_PROC: Gold.usp_populate_new_columns
+  # Chạy theo đúng thứ tự này. Bronze trước Gold vì Gold đọc dữ liệu từ Bronze.
+  # Thêm bảng/schema mới cần backfill thì thêm tên proc vào cuối danh sách.
+  POPULATE_PROCS: >-
+    Bronze.usp_populate_new_columns
+    Gold.usp_populate_new_columns
 
 jobs:
   # Cùng vai trò với job validate của deploy-to-fabric.yml: chặn deploy nếu repo
@@ -145,8 +149,12 @@ jobs:
       # Backfill runs as plain SQL against the endpoint just published to.
       - name: Populate new columns
         run: |
-          python cicd/run_sql.py \
-            --server "$INSURANCE_WH_ENDPOINT" \
-            --database "$WAREHOUSE" \
-            --procedure "$POPULATE_PROC" \
-            --skip-if-missing
+          for proc in $POPULATE_PROCS; do
+            echo "::group::$proc"
+            python cicd/run_sql.py \
+              --server "$INSURANCE_WH_ENDPOINT" \
+              --database "$WAREHOUSE" \
+              --procedure "$proc" \
+              --skip-if-missing
+            echo "::endgroup::"
+          done
