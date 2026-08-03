@@ -43,10 +43,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -75,10 +75,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.x"
 
@@ -120,7 +120,7 @@ jobs:
       # Keeping the artifact makes it possible to inspect exactly what would
       # have been deployed, without re-running the build.
       - name: Upload dacpac artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dacpac-pr-${{ github.event.pull_request.number }}
           path: dacpac-out/**/*.dacpac

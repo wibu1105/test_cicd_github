@@ -11,6 +11,9 @@ on:
     paths:
       # See deploy-warehouse.yml for why this is not 'fabric/**/*.Lakehouse/**'.
       - 'fabric/*.Lakehouse/**'
+      # Editing the schema notebook has to re-apply the schema too, otherwise
+      # a new table only lands the next time the Lakehouse item itself changes.
+      - 'fabric/nb_lakehouse_schema.Notebook/**'
   workflow_dispatch:
     inputs:
       run_job:
@@ -41,9 +44,9 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -60,15 +63,15 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - run: pip install -r cicd/requirements.txt
 
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -96,10 +99,10 @@ jobs:
             --items-in-scope '["Lakehouse"]' \
             --unpublish-orphans false
 
-      # Tương đương bước "Publish schema" của Warehouse: chạy lại notebook khai
-      # báo schema mỗi lần pipeline này chạy. --skip-if-missing để không fail
-      # khi notebook chưa được tạo/deploy (deploy-to-fabric.yml mới là chỗ
-      # publish item Notebook này).
+      # The Lakehouse equivalent of the warehouse dacpac publish. Deliberately
+      # NOT --skip-if-missing: the notebook is published by deploy-to-fabric.yml,
+      # and if it is absent the schema silently never gets created. Failing here
+      # is the signal that the two workflows ran out of order.
       - name: Apply lakehouse schema
         run: |
           python cicd/trigger_job.py \
@@ -107,8 +110,7 @@ jobs:
             --item-name "$SCHEMA_NOTEBOOK" \
             --item-type Notebook \
             --wait \
-            --timeout-minutes 20 \
-            --skip-if-missing
+            --timeout-minutes 20
 
       - name: Run post-deploy job
         if: ${{ inputs.run_job != '' }}

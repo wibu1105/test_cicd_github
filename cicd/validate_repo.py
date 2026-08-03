@@ -322,38 +322,108 @@ def check_parameterisation_coverage(rep, entries, target_env):
 
 
 # ----------------------------------------------------------------------
-# 6. Notebook must resolve the warehouse by name
+# 6. Notebooks must resolve their data store by name, not by GUID
 # ----------------------------------------------------------------------
+# A notebook that names its store resolves it in whatever workspace it runs in,
+# so one file works in dev and test. A notebook carrying a GUID keeps pointing
+# at the workspace it was authored in — it deploys clean and then reads or
+# writes the wrong environment.
+RESOLVE_BY_NAME = (
+    "connect_to_artifact",      # warehouse, resolved via notebookutils
+    "lakehouse.get(",           # lakehouse, resolved via notebookutils
+)
+
+# A notebook attaches its store by writing that store's GUID into the metadata
+# header. Which GUID decides whether the notebook is portable:
+#   - the item's logicalId (from its .platform) is the repo-level identity, and
+#     Fabric maps it to whichever real item carries it in the target workspace
+#   - any other GUID is a workspace-specific item id and will keep pointing at
+#     the workspace the notebook was authored in
+DEFAULT_STORE_RE = re.compile(
+    r'"default_(?:lakehouse|warehouse)"\s*:\s*"([0-9a-fA-F-]{36})"')
+# Pins the notebook to one workspace, defeating the logicalId indirection.
+STORE_WORKSPACE_RE = re.compile(
+    r'"default_(?:lakehouse|warehouse)_workspace_id"\s*:\s*"([0-9a-fA-F-]{36})"')
+
+
+def repo_logical_ids():
+    """logicalId -> item folder name, for every Fabric item in the repo."""
+    ids = {}
+    for platform in FABRIC_DIR.rglob(".platform"):
+        try:
+            doc = json.loads(platform.read_text(errors="replace"))
+        except json.JSONDecodeError:
+            continue
+        logical_id = doc.get("config", {}).get("logicalId")
+        if logical_id:
+            ids[logical_id] = platform.parent.name
+    return ids
+
+
 def check_notebooks(rep):
     print("\n[6] Notebook portability")
 
     if not FABRIC_DIR.is_dir():
         return
 
+    # Both suffixes: a PySpark notebook exports as .py, a SQL one as .sql.
     nb_files = [p for p in FABRIC_DIR.rglob("*")
-                if p.is_file() and p.suffix.lower() == ".py"
+                if p.is_file() and p.suffix.lower() in {".py", ".sql"}
                 and ".Notebook" in str(p)]
     if not nb_files:
         rep.info("No notebook source files found — skipping")
         return
 
+    logical_ids = repo_logical_ids()
+
     for f in nb_files:
         text = f.read_text(errors="replace")
+        name = f.relative_to(FABRIC_DIR)
+
         hosts = WAREHOUSE_HOST_RE.findall(text)
         if hosts:
             rep.error(
                 "notebook",
-                f"{f.relative_to(FABRIC_DIR)} hardcodes a warehouse endpoint "
-                f"({hosts[0]}). Resolve the warehouse by name instead — "
-                f'notebookutils.data.connect_to_artifact("insurance_WH") — so the '
-                f"same file works in every workspace.",
+                f"{name} hardcodes a warehouse endpoint ({hosts[0]}). Resolve the "
+                f'warehouse by name instead — notebookutils.data.connect_to_artifact'
+                f'("insurance_WH") — so the same file works in every workspace.',
                 file=str(f))
-        elif "connect_to_artifact" in text:
-            rep.ok(f"{f.relative_to(FABRIC_DIR)} resolves its warehouse by name")
+            continue
+
+        workspace_pin = STORE_WORKSPACE_RE.search(text)
+        if workspace_pin:
+            rep.error(
+                "notebook",
+                f"{name} pins default_..._workspace_id ({workspace_pin.group(1)}). "
+                f"That sends every environment back to the workspace this was "
+                f"authored in. Drop the key — without it the store resolves in "
+                f"whichever workspace the notebook runs in.",
+                file=str(f))
+            continue
+
+        attached = DEFAULT_STORE_RE.search(text)
+        if attached:
+            guid = attached.group(1)
+            owner = logical_ids.get(guid)
+            if owner:
+                rep.ok(f"{name} attaches {owner} by logicalId")
+            else:
+                rep.error(
+                    "notebook",
+                    f"{name} attaches a store by GUID {guid}, which is not the "
+                    f"logicalId of any item in {FABRIC_DIR}/. That makes it a "
+                    f"workspace-specific item id, so after deploy the notebook "
+                    f"would still read the workspace it was authored in. Use the "
+                    f"logicalId from the item's .platform file instead.",
+                    file=str(f))
+            continue
+
+        if any(marker in text for marker in RESOLVE_BY_NAME):
+            rep.ok(f"{name} resolves its data store by name")
         else:
             rep.warn("notebook",
-                     f"{f.relative_to(FABRIC_DIR)}: no connect_to_artifact call found — "
-                     f"verify how it reaches the warehouse.",
+                     f"{name}: no attached store and no connect_to_artifact / "
+                     f"lakehouse.get call — verify how it reaches its data store.",
                      file=str(f))
 
 
