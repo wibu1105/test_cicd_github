@@ -127,7 +127,9 @@ jobs:
           except yaml.YAMLError as e:
               print(f"::error::parameter.yml is not valid YAML: {e}")
               sys.exit(1)
-          entries = doc.get("find_replace", [])
+          # 'find_replace:' with every rule commented out parses as None, not
+          # as an empty list — without the `or []` that iterates over None.
+          entries = doc.get("find_replace") or []
           for i, e in enumerate(entries, 1):
               fv = str(e.get("find_value", ""))
               if fv.startswith("<") and fv.endswith(">"):
@@ -212,19 +214,9 @@ jobs:
           echo "DEPLOY_CLIENT_ID=$DEPLOY_CLIENT_ID" >> $GITHUB_ENV
           echo "DEPLOY_CLIENT_SECRET=$DEPLOY_CLIENT_SECRET" >> $GITHUB_ENV
 
-      # This is the only workflow that publishes Notebook items, so it is the
-      # only one where repointing their attached lakehouse/warehouse has any
-      # effect — find_replace only applies to items being published.
-      - name: Resolve attached-store ids into parameter.yml
-        env:
-          AZURE_TENANT_ID: ${{ env.DEPLOY_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ env.DEPLOY_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ env.DEPLOY_CLIENT_SECRET }}
-        run: |
-          python cicd/resolve_ids.py \
-            --target-env "${{ env.TARGET_ENV }}" \
-            --source-workspace-id "${{ vars.SOURCE_WORKSPACE_ID }}" \
-            --parameter-file "${{ steps.gitdir.outputs.gitdir }}/parameter.yml"
+      # Repointing attached lakehouses/warehouses is pure find_replace now —
+      # the dev ids are pinned in cicd/parameter.yml and staged above, so
+      # there is no id-resolution step to run before publishing.
 
       # ----------------------------------------------------------------
       # Phase 1 — Deploy Fabric items (Sử dụng credentials vừa kéo ra)

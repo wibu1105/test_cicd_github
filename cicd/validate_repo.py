@@ -27,6 +27,17 @@ CICD_DIR = pathlib.Path("cicd")
 WAREHOUSE_HOST_RE = re.compile(r"[a-z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com")
 GUID_RE = re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")
 
+# A DirectLake-on-OneLake model does not name a SQL endpoint at all. It reaches
+# its warehouse or lakehouse through a OneLake path that carries two ids:
+#     https://onelake.dfs.fabric.microsoft.com/<workspace id>/<item id>
+# Both are environment-specific, and because neither is a *.datawarehouse.*
+# hostname, a check that only looks for endpoints reports the model as clean
+# while it keeps reading from dev after deploy. That is the exact failure this
+# pattern exists to catch.
+ONELAKE_URL_RE = re.compile(
+    r"onelake\.dfs\.fabric\.microsoft\.com/"
+    r"([0-9a-fA-F-]{36})/([0-9a-fA-F-]{36})")
+
 
 class Report:
     """Collects findings and emits GitHub Actions annotations."""
@@ -304,21 +315,42 @@ def check_parameterisation_coverage(rep, entries, target_env):
     findings = 0
     for f in definition_files:
         text = f.read_text(errors="replace")
+        name = f.relative_to(FABRIC_DIR)
+
         for host in set(WAREHOUSE_HOST_RE.findall(text)):
             findings += 1
             covered = any(entry_matches(e, text) for e in entries)
             if covered:
-                rep.ok(f"{f.relative_to(FABRIC_DIR)}: endpoint covered by a parameter.yml rule")
+                rep.ok(f"{name}: endpoint covered by a parameter.yml rule")
             else:
                 rep.error(
                     "coverage",
-                    f"{f.relative_to(FABRIC_DIR)} contains a hardcoded warehouse endpoint "
+                    f"{name} contains a hardcoded warehouse endpoint "
                     f"({host}) with no matching find_replace rule for '{target_env}'. "
                     f"After deployment this item would still read from the dev warehouse.",
                     file=str(f))
 
+        # DirectLake-on-OneLake connections. Each id is checked on its own:
+        # rewriting the workspace but not the item id still leaves the model
+        # pointing at a warehouse that lives in another workspace.
+        for workspace_guid, item_guid in set(ONELAKE_URL_RE.findall(text)):
+            for label, guid in (("workspace id", workspace_guid),
+                                ("item id", item_guid)):
+                findings += 1
+                if any(entry_matches(e, guid) for e in entries):
+                    rep.ok(f"{name}: OneLake {label} {guid} is rewritten by parameter.yml")
+                else:
+                    rep.error(
+                        "coverage",
+                        f"{name} has a DirectLake OneLake URL whose {label} ({guid}) "
+                        f"has no matching find_replace rule for '{target_env}'. This "
+                        f"item deploys without error and then keeps reading from the "
+                        f"source workspace. Add a find_replace entry mapping {guid} to "
+                        f"the right $workspace.id / $items.<Type>.<name>.id token.",
+                        file=str(f))
+
     if findings == 0:
-        rep.ok("No hardcoded warehouse endpoints found in item definitions")
+        rep.ok("No environment-specific data-store references found in item definitions")
 
 
 # ----------------------------------------------------------------------
@@ -341,15 +373,15 @@ RESOLVE_BY_NAME = (
 #     publish time (what nb_lakehouse_schema does)
 # Anything else deploys cleanly and then reads or writes the wrong workspace.
 #
+# There is no third option. Recording the store's *name* beside the id does not
+# make the notebook portable on its own — nothing reads that name at deploy
+# time — so a named-but-unmapped GUID is still an error here.
+#
 # The two store types are not symmetric: a lakehouse block also requires
 # default_lakehouse_workspace_id, and omitting it fails the job outright with
 # "LakehouseWorkspaceId is not a valid GUID:".
 ATTACHED_GUID_RE = re.compile(
     r'"(default_(?:lakehouse|warehouse)(?:_workspace_id)?)"\s*:\s*"([0-9a-fA-F-]{36})"')
-# The name Fabric records beside the id. resolve_ids.py maps by this name, so a
-# header without it cannot be repointed at deploy time.
-STORE_NAME_RE = re.compile(
-    r'"default_(?:lakehouse|warehouse)_name"\s*:\s*"([^"]+)"')
 
 
 def repo_logical_ids():
@@ -398,33 +430,21 @@ def check_notebooks(rep, entries, target_env):
 
         attached = ATTACHED_GUID_RE.findall(text)
         if attached:
-            # resolve_ids.py resolves stores by name against the Fabric API, so
-            # this gate cannot confirm the mapping without credentials it does
-            # not have. What it can confirm is that the header carries the name
-            # resolve_ids.py needs — a GUID with no name beside it is the case
-            # that would deploy still pointing at the source workspace.
-            has_name = STORE_NAME_RE.search(text)
             for key, guid in attached:
                 owner = logical_ids.get(guid)
                 if owner:
                     rep.ok(f"{name}: {key} is {owner}'s logicalId")
                 elif any(entry_matches(e, guid) for e in entries):
                     rep.ok(f"{name}: {key} is rewritten by parameter.yml")
-                elif key.endswith("_workspace_id"):
-                    rep.ok(f"{name}: {key} -> $workspace.id at deploy time")
-                elif has_name:
-                    rep.ok(f"{name}: {key} resolves by name "
-                           f"'{has_name.group(1)}' at deploy time")
                 else:
                     rep.error(
                         "notebook",
-                        f"{name} sets {key} to {guid} with no "
-                        f"{key}_name beside it, so resolve_ids.py cannot map it "
-                        f"to a store. It is not an item's logicalId either, and no "
-                        f"find_replace rule in parameter.yml covers it for "
-                        f"'{target_env}'. After deploy this notebook would still "
-                        f"attach to the workspace it was authored in. Re-attach the "
-                        f"store in Fabric so the header records its name.",
+                        f"{name} sets {key} to {guid}, which is neither an item's "
+                        f"logicalId nor covered by a find_replace rule in "
+                        f"parameter.yml for '{target_env}'. After deploy this "
+                        f"notebook would still attach to the workspace it was "
+                        f"authored in. Add a find_replace entry mapping {guid} to "
+                        f"the right $workspace.id / $items.<Type>.<name>.id token.",
                         file=str(f))
             continue
 

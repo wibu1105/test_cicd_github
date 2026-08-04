@@ -1,4 +1,4 @@
-# validate_repo.py imports resolve_ids, so running it locally leaves bytecode.
+# Running the cicd/ scripts locally leaves bytecode.
 __pycache__/
 *.pyc
 
@@ -9,6 +9,6 @@ __pycache__/
 dacpac-out/
 global.json
 
-# parameter.yml is copied into the git directory at deploy time, with the
-# generated find_replace rules appended. The source of truth is cicd/parameter.yml.
+# parameter.yml is copied into the git directory at deploy time, because that
+# is where fabric-cicd looks for it. The source of truth is cicd/parameter.yml.
 fabric/parameter.yml

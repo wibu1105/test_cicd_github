@@ -18,30 +18,53 @@ key_value_replace:
 
 find_replace:
 
-  # ------------------------------------------------------------------
-  # Semantic model sales_semantic_model -> warehouse connection.
-  # Captures hostname + database GUID as one group; replaces with both
-  # dynamic tokens together. Resolved against insurance_WH in the target
-  # workspace at deploy time.
-  # ------------------------------------------------------------------
-  - find_value: 'Sql\.Database\(("[a-z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com",\s*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"\)'
-    is_regex: "true"
+  # ==================================================================
+  # Dev GUIDs baked into item definitions.
+  #
+  # These three ids belong to the dev workspace. They are written into
+  # item definitions by Fabric itself when you attach a store in the UI,
+  # and they do NOT change on their own — so they are pinned here rather
+  # than resolved from the Fabric API at deploy time.
+  #
+  # None of these rules sets item_type. That is deliberate: the same dev
+  # id shows up in more than one kind of item, and a filter is exactly
+  # what made the semantic model deploy still pointing at dev.
+  #   - workspace id  -> nb_lakehouse_schema header + semantic model URL
+  #   - test_LH id    -> nb_lakehouse_schema header
+  #   - insurance_WH  -> semantic model DirectLake URL
+  # A full GUID only ever matches a real reference to that item, so
+  # letting these apply everywhere is both safer and less to maintain.
+  #
+  # If a store is ever DELETED and recreated in dev, its id changes and
+  # the matching find_value below must be updated. cicd/validate_repo.py
+  # fails the PR when an item carries a dev id no rule here covers, so a
+  # stale entry shows up as a red X instead of as wrong data.
+  # ==================================================================
+
+  # Dev workspace: dev_github_cicd
+  - find_value: "20d6e797-9f3e-4e0a-a291-0789bdb1b623"
     replace_value:
-      test: '"$items.Warehouse.insurance_WH.sqlendpoint", "$items.Warehouse.insurance_WH.id"'
-    item_type: "SemanticModel"
+      test: "$workspace.id"
+
+  # Dev lakehouse: test_LH
+  - find_value: "b55ebcb9-1444-450f-92eb-0dd5f28bbe6d"
+    replace_value:
+      test: "$items.Lakehouse.test_LH.id"
 
   # ------------------------------------------------------------------
-  # Notebooks that attach a lakehouse or warehouse are NOT listed here.
+  # Dev warehouse: insurance_WH
   #
-  # Their headers carry the source workspace's item id and workspace id, which
-  # change whenever a store is recreated. Writing those GUIDs down here means
-  # updating this file every time that happens, and a stale entry fails silently
-  # — the rule just stops matching and the notebook deploys still pointing at the
-  # workspace it came from.
+  # sales_semantic_model is DirectLake-on-OneLake. Its connection is an
+  # AzureStorage.DataLake URL in definition/expressions.tmdl, shaped
+  #   https://onelake.dfs.fabric.microsoft.com/<workspace id>/<item id>
+  # so the warehouse is addressed by ITEM ID, not by SQL endpoint. The
+  # rule above rewrites the first segment, this one the second.
   #
-  # cicd/resolve_ids.py generates those rules at deploy time instead: it lists
-  # the source workspace over the Fabric REST API and emits, for every lakehouse
-  # and warehouse it finds, find_value: <live id> -> $items.<Type>.<name>.id.
-  # Recreate a lakehouse as often as you like; as long as the name holds, the
-  # next run reads the new id straight from Fabric.
+  # There is no Sql.Database(...) string anywhere in this model, so a
+  # rule matching on the .datawarehouse.fabric.microsoft.com hostname
+  # matches nothing. Only add one back if the model is re-authored over
+  # the SQL endpoint (import / DirectQuery from Power BI Desktop).
   # ------------------------------------------------------------------
+  - find_value: "5e59288a-8c37-41e0-985f-9791bffd60c6"
+    replace_value:
+      test: "$items.Warehouse.insurance_WH.id"
