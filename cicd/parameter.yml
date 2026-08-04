@@ -19,52 +19,61 @@ key_value_replace:
 find_replace:
 
   # ==================================================================
-  # Dev GUIDs baked into item definitions.
+  # Notebook METADATA headers.
   #
-  # These three ids belong to the dev workspace. They are written into
-  # item definitions by Fabric itself when you attach a store in the UI,
-  # and they do NOT change on their own — so they are pinned here rather
-  # than resolved from the Fabric API at deploy time.
+  # Fabric writes the attached store's id and its workspace id into the
+  # header when you attach a lakehouse in the UI. Both are dev values, so
+  # both are pinned below.
   #
-  # None of these rules sets item_type. That is deliberate: the same dev
-  # id shows up in more than one kind of item, and a filter is exactly
-  # what made the semantic model deploy still pointing at dev.
-  #   - workspace id  -> nb_lakehouse_schema header + semantic model URL
-  #   - test_LH id    -> nb_lakehouse_schema header
-  #   - insurance_WH  -> semantic model DirectLake URL
-  # A full GUID only ever matches a real reference to that item, so
-  # letting these apply everywhere is both safer and less to maintain.
+  # Pinning is the weak spot: delete and recreate test_LH in dev and its
+  # id changes, the rule stops matching, and the notebook deploys still
+  # attached to dev. cicd/validate_repo.py turns that into a red pull
+  # request — it applies these rules to the file and fails if a dev GUID
+  # survives — but the entry still has to be updated by hand.
   #
-  # If a store is ever DELETED and recreated in dev, its id changes and
-  # the matching find_value below must be updated. cicd/validate_repo.py
-  # fails the PR when an item carries a dev id no rule here covers, so a
-  # stale entry shows up as a red X instead of as wrong data.
+  # The semantic model rule further down avoids this entirely by matching
+  # on SHAPE instead of value. The same trick does not work here: a
+  # notebook header is full of GUIDs (logicalIds, known_lakehouses) and a
+  # shape-based rule could not tell them apart.
   # ==================================================================
 
   # Dev workspace: dev_github_cicd
   - find_value: "20d6e797-9f3e-4e0a-a291-0789bdb1b623"
     replace_value:
       test: "$workspace.id"
+    item_type: "Notebook"
 
   # Dev lakehouse: test_LH
   - find_value: "b55ebcb9-1444-450f-92eb-0dd5f28bbe6d"
     replace_value:
       test: "$items.Lakehouse.test_LH.id"
+    item_type: "Notebook"
 
-  # ------------------------------------------------------------------
-  # Dev warehouse: insurance_WH
+  # ==================================================================
+  # sales_semantic_model -> warehouse, DirectLake-on-OneLake.
   #
-  # sales_semantic_model is DirectLake-on-OneLake. Its connection is an
-  # AzureStorage.DataLake URL in definition/expressions.tmdl, shaped
+  # The connection is an AzureStorage.DataLake URL in
+  # definition/expressions.tmdl, shaped
   #   https://onelake.dfs.fabric.microsoft.com/<workspace id>/<item id>
-  # so the warehouse is addressed by ITEM ID, not by SQL endpoint. The
-  # rule above rewrites the first segment, this one the second.
+  # so the warehouse is addressed by ITEM ID, not by SQL endpoint.
+  # There is no Sql.Database(...) string anywhere in this model, which
+  # is why a rule matching the .datawarehouse.fabric.microsoft.com
+  # hostname matched nothing and the model kept reading dev.
   #
-  # There is no Sql.Database(...) string anywhere in this model, so a
-  # rule matching on the .datawarehouse.fabric.microsoft.com hostname
-  # matches nothing. Only add one back if the model is re-authored over
-  # the SQL endpoint (import / DirectQuery from Power BI Desktop).
-  # ------------------------------------------------------------------
-  - find_value: "5e59288a-8c37-41e0-985f-9791bffd60c6"
+  # Matching the GUID PAIR by shape rather than by value is what keeps
+  # this rule alive: recreate the warehouse in dev and its id changes,
+  # but the URL still holds two GUIDs, so the rule still fires. Nothing
+  # environment-specific is written down here at all.
+  #
+  # Exactly one capture group, spanning both segments — fabric-cicd
+  # replaces the group, not the whole match, so the hostname survives.
+  # This is also why the two rules above are pinned to Notebook: if the
+  # workspace rule ran unfiltered it would rewrite the first segment to
+  # $workspace.id first, the pair would no longer be two GUIDs, and
+  # this rule would stop matching.
+  # ==================================================================
+  - find_value: 'onelake\.dfs\.fabric\.microsoft\.com/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})'
+    is_regex: "true"
     replace_value:
-      test: "$items.Warehouse.insurance_WH.id"
+      test: "$workspace.id/$items.Warehouse.insurance_WH.id"
+    item_type: "SemanticModel"

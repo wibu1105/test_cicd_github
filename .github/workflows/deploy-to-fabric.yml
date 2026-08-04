@@ -234,6 +234,21 @@ jobs:
             --items-in-scope "${{ github.event.inputs.items_in_scope || '[\"Notebook\",\"DataPipeline\",\"SemanticModel\",\"Report\"]' }}" \
             --unpublish-orphans "${{ github.event.inputs.unpublish_orphans || 'true' }}"
 
+      # Publishing successfully is not the same as publishing correctly: the
+      # model spent weeks deploying green while still reading from dev. This
+      # reads the definition back out of the workspace and fails the run if any
+      # OneLake URL in it resolves anywhere other than here.
+      - name: Verify semantic model points at this workspace
+        env:
+          AZURE_TENANT_ID: ${{ env.DEPLOY_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ env.DEPLOY_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ env.DEPLOY_CLIENT_SECRET }}
+        run: |
+          python cicd/verify_semantic_model.py \
+            --workspace-id "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
+            --model-name sales_semantic_model \
+            --expect-warehouse insurance_WH
+
       # Warehouse endpoint resolution and dacpac publish used to live here.
       # They now belong to deploy-warehouse.yml — keeping them in both places
       # published the same schema twice on a single push.

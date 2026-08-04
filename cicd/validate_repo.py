@@ -298,6 +298,53 @@ def entry_matches(entry, text):
     return fv in text
 
 
+def item_type_of(path):
+    """Fabric item type for a file, read from the .platform of its item folder."""
+    for parent in path.parents:
+        platform = parent / ".platform"
+        if platform.is_file():
+            try:
+                return json.loads(platform.read_text(errors="replace")) \
+                    .get("metadata", {}).get("type")
+            except json.JSONDecodeError:
+                return None
+    return None
+
+
+def apply_entries(text, entries, target_env, item_type=None):
+    """Reproduce what fabric-cicd's find_replace would leave behind.
+
+    Asking 'is this GUID mentioned somewhere in parameter.yml' is not the same
+    question as 'would this GUID survive deployment', and the two answers
+    diverge exactly where it hurts: a regex rule spanning a whole URL mentions
+    no GUID at all, and a rule filtered to another item_type mentions one it
+    will never touch. Applying the rules and looking at the result is the only
+    check that cannot drift away from what actually gets published.
+    """
+    for entry in entries:
+        wanted = entry.get("item_type")
+        if wanted:
+            wanted = [wanted] if isinstance(wanted, str) else list(wanted)
+            if item_type not in wanted:
+                continue
+
+        fv = str(entry.get("find_value", ""))
+        rv = str((entry.get("replace_value") or {}).get(target_env, ""))
+
+        if str(entry.get("is_regex", "")).lower() == "true":
+            try:
+                # fabric-cicd substitutes capture group 1, not the whole match,
+                # so everything around the group is preserved.
+                text = re.sub(fv,
+                              lambda m: m.group(0).replace(m.group(1), rv, 1),
+                              text)
+            except (re.error, IndexError):
+                continue
+        else:
+            text = text.replace(fv, rv)
+    return text
+
+
 def check_parameterisation_coverage(rep, entries, target_env):
     print("\n[5] Parameterisation coverage")
 
@@ -317,37 +364,36 @@ def check_parameterisation_coverage(rep, entries, target_env):
         text = f.read_text(errors="replace")
         name = f.relative_to(FABRIC_DIR)
 
-        for host in set(WAREHOUSE_HOST_RE.findall(text)):
-            findings += 1
-            covered = any(entry_matches(e, text) for e in entries)
-            if covered:
-                rep.ok(f"{name}: endpoint covered by a parameter.yml rule")
-            else:
-                rep.error(
-                    "coverage",
-                    f"{name} contains a hardcoded warehouse endpoint "
-                    f"({host}) with no matching find_replace rule for '{target_env}'. "
-                    f"After deployment this item would still read from the dev warehouse.",
-                    file=str(f))
+        if not (WAREHOUSE_HOST_RE.search(text) or ONELAKE_URL_RE.search(text)):
+            continue
 
-        # DirectLake-on-OneLake connections. Each id is checked on its own:
-        # rewriting the workspace but not the item id still leaves the model
-        # pointing at a warehouse that lives in another workspace.
-        for workspace_guid, item_guid in set(ONELAKE_URL_RE.findall(text)):
-            for label, guid in (("workspace id", workspace_guid),
-                                ("item id", item_guid)):
-                findings += 1
-                if any(entry_matches(e, guid) for e in entries):
-                    rep.ok(f"{name}: OneLake {label} {guid} is rewritten by parameter.yml")
-                else:
-                    rep.error(
-                        "coverage",
-                        f"{name} has a DirectLake OneLake URL whose {label} ({guid}) "
-                        f"has no matching find_replace rule for '{target_env}'. This "
-                        f"item deploys without error and then keeps reading from the "
-                        f"source workspace. Add a find_replace entry mapping {guid} to "
-                        f"the right $workspace.id / $items.<Type>.<name>.id token.",
-                        file=str(f))
+        findings += 1
+        deployed = apply_entries(text, entries, target_env, item_type_of(f))
+
+        for host in set(WAREHOUSE_HOST_RE.findall(deployed)):
+            rep.error(
+                "coverage",
+                f"{name} would still contain the hardcoded warehouse endpoint "
+                f"{host} after the '{target_env}' rules are applied. The item "
+                f"deploys without error and then reads from the dev warehouse.",
+                file=str(f))
+
+        # A OneLake URL that still holds raw GUIDs after substitution is the
+        # DirectLake failure: rewriting the workspace but not the item id
+        # leaves the model pointing into another workspace just as surely as
+        # rewriting neither.
+        for workspace_guid, item_guid in set(ONELAKE_URL_RE.findall(deployed)):
+            rep.error(
+                "coverage",
+                f"{name} has a DirectLake OneLake URL that is still literal after "
+                f"the '{target_env}' rules are applied: workspace {workspace_guid}, "
+                f"item {item_guid}. The model deploys clean and then keeps reading "
+                f"from the source workspace. Add or widen a find_replace rule so "
+                f"both segments become $workspace / $items tokens.",
+                file=str(f))
+
+        if not WAREHOUSE_HOST_RE.search(deployed) and not ONELAKE_URL_RE.search(deployed):
+            rep.ok(f"{name}: every store reference is rewritten for '{target_env}'")
 
     if findings == 0:
         rep.ok("No environment-specific data-store references found in item definitions")
@@ -434,7 +480,7 @@ def check_notebooks(rep, entries, target_env):
                 owner = logical_ids.get(guid)
                 if owner:
                     rep.ok(f"{name}: {key} is {owner}'s logicalId")
-                elif any(entry_matches(e, guid) for e in entries):
+                elif apply_entries(guid, entries, target_env, "Notebook") != guid:
                     rep.ok(f"{name}: {key} is rewritten by parameter.yml")
                 else:
                     rep.error(
