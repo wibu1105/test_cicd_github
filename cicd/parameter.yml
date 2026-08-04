@@ -24,10 +24,10 @@ find_replace:
   # dynamic tokens together. Resolved against insurance_WH in the target
   # workspace at deploy time.
   # ------------------------------------------------------------------
-  - find_value: 'Sql\.Database\(("[a-z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com",\s*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"\)'
+  - find_value: 'Sql\.Database\(("[a-z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com",\s*"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")\)'
     is_regex: "true"
     replace_value:
-      test: '"$items.Warehouse.insurance_WH.sqlendpoint", "$items.Warehouse.insurance_WH.id"'
+     test: '"$items.Warehouse.insurance_WH.sqlendpoint", "$items.Warehouse.insurance_WH.id"'
     item_type: "SemanticModel"
 
   # ------------------------------------------------------------------
