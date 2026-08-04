@@ -334,9 +334,10 @@ def apply_entries(text, entries, target_env, item_type=None):
         if str(entry.get("is_regex", "")).lower() == "true":
             try:
                 # fabric-cicd substitutes capture group 1, not the whole match,
-                # so everything around the group is preserved.
+                # so everything around the group is preserved. `rv=rv` binds
+                # this iteration's value instead of the loop variable itself.
                 text = re.sub(fv,
-                              lambda m: m.group(0).replace(m.group(1), rv, 1),
+                              lambda m, rv=rv: m.group(0).replace(m.group(1), rv, 1),
                               text)
             except (re.error, IndexError):
                 continue
