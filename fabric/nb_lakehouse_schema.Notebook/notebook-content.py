@@ -23,26 +23,21 @@
 # MARKDOWN ********************
 
 # # Lakehouse schema
-#
-# Declares the schema of `test_LH`. Run by `deploy-lakehouse.yml` after the
+# # Declares the schema of `test_LH`. Run by `deploy-lakehouse.yml` after the
 # Lakehouse item is published — the Lakehouse equivalent of the dacpac publish
 # on the warehouse side.
-#
-# The GUIDs above are the **dev** lakehouse and workspace, exactly as Fabric
+# # The GUIDs above are the **dev** lakehouse and workspace, exactly as Fabric
 # writes them when the lakehouse is attached in the UI. They do not stay dev
 # values after deploy: `cicd/parameter.yml` rewrites both to `$items.Lakehouse.
 # test_LH.id` and `$workspace.id`, so the notebook attaches to the target
 # workspace's own lakehouse.
-#
-# Two things this block cannot do without:
-#
-# - `default_lakehouse_workspace_id` is **required**. Omit it and the job fails
+# # Two things this block cannot do without:
+# # - `default_lakehouse_workspace_id` is **required**. Omit it and the job fails
 #   with `LakehouseWorkspaceId is not a valid GUID:` (empty). The `warehouse`
 #   block in `nb_transform` has no such field — the two are not symmetric.
 # - `default_lakehouse` must be the lakehouse's **item id**, not the `logicalId`
 #   in `.platform`. Those two are different GUIDs for the same item.
-#
-# Every statement is idempotent: this runs on every lakehouse deploy, not only
+# # Every statement is idempotent: this runs on every lakehouse deploy, not only
 # when a table is added.
 
 # CELL ********************
