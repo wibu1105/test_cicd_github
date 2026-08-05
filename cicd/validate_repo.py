@@ -555,6 +555,74 @@ def check_reports(rep, entries):
 
 
 # ----------------------------------------------------------------------
+# 8. Every find_replace rule must actually hit something
+# ----------------------------------------------------------------------
+# The failure mode this exists for: a rule that matches nothing is silent.
+# fabric-cicd does not warn, the deploy goes green, and the item ships with its
+# dev GUIDs intact — you only find out by opening the lineage view in Fabric.
+#
+# Both bugs that produced this check were of exactly that shape: rules written
+# against Sql.Database when the semantic model is Direct Lake over OneLake, and
+# rules prefixed "# META" aimed at a SQL notebook that writes "-- META".
+#
+# Only find_replace is covered. key_value_replace rules are JSONPath against
+# specific items and are not reachable by text search.
+def check_rule_effectiveness(rep, entries):
+    print("\n[8] find_replace rules match at least one file")
+
+    if not FABRIC_DIR.is_dir():
+        return
+    if not entries:
+        rep.info("No find_replace entries — skipping")
+        return
+
+    for i, entry in enumerate(entries, 1):
+        fv = str(entry.get("find_value", ""))
+        if not fv:
+            continue
+        is_regex = str(entry.get("is_regex", "")).lower() == "true"
+        item_type = entry.get("item_type")
+
+        # Fabric item folders are named "<display name>.<ItemType>", and a rule
+        # with an item_type only ever runs against items of that type. A rule can
+        # be a perfectly good regex and still be dead because it is pointed at
+        # the wrong one.
+        if item_type:
+            item_dirs = sorted(FABRIC_DIR.glob(f"*.{item_type}"))
+            if not item_dirs:
+                rep.warn("parameter",
+                         f"Entry {i} targets item_type '{item_type}', but the repo "
+                         f"contains no item of that type — the rule cannot fire.")
+                continue
+            candidates = [p for d in item_dirs for p in d.rglob("*") if p.is_file()]
+        else:
+            candidates = [p for p in FABRIC_DIR.rglob("*") if p.is_file()]
+
+        hits = []
+        for p in candidates:
+            text = p.read_text(errors="replace")
+            try:
+                matched = (re.search(fv, text) is not None) if is_regex else (fv in text)
+            except re.error:
+                matched = False  # already reported by load_parameter_file
+            if matched:
+                hits.append(p.relative_to(FABRIC_DIR))
+
+        label = f"Entry {i}" + (f" ({item_type})" if item_type else "")
+        if hits:
+            rep.ok(f"{label} matches {', '.join(str(h) for h in hits)}")
+        else:
+            rep.error(
+                "parameter",
+                f"{label} matches no file under any *.{item_type or '<any type>'} "
+                f"item. find_value: {fv!r}. A rule that matches nothing is applied "
+                f"silently and the item deploys with its source-workspace ids "
+                f"intact — check the connector, the metadata comment prefix "
+                f"('# META' for .py notebooks, '-- META' for .sql), and the "
+                f"item_type.")
+
+
+# ----------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
         description="Static validation of the Fabric CI/CD repository")
@@ -576,6 +644,7 @@ def main():
     check_parameterisation_coverage(rep, entries, args.target_env)
     check_notebooks(rep, entries, args.target_env)
     check_reports(rep, entries)
+    check_rule_effectiveness(rep, entries)
 
     sys.exit(rep.summary())
 
