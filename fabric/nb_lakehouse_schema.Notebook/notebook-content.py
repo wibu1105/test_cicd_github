@@ -23,7 +23,7 @@
 # MARKDOWN ********************
 
 # # Lakehouse schema
-# # Declares the schema of `test_LH`. Run by `deploy-lakehouse.yml` after the
+# # Declares the schema of `test_LH`. Run by `deploy-to-fabric.yml` after the
 # Lakehouse item is published — the Lakehouse equivalent of the dacpac publish
 # on the warehouse side.
 # # The GUIDs above are the **dev** lakehouse and workspace, exactly as Fabric

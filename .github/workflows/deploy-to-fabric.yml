@@ -1,37 +1,64 @@
 name: Deploy to Fabric
 
-# Everything that is not the Warehouse or the Lakehouse item itself.
-# deploy-warehouse.yml owns the warehouse schema (dacpac / SqlPackage) and
-# deploy-lakehouse.yml owns the lakehouse schema (nb_lakehouse_schema run).
+# Publishes every Fabric ITEM: Lakehouse, Warehouse, Notebook, DataPipeline,
+# SemanticModel, Report — then runs the lakehouse schema notebook.
 #
-# NOTE ON SCOPE: Warehouse and Lakehouse are NOT in --items-in-scope. This
-# workflow does not create, update or delete a store item in any way.
+# deploy-warehouse.yml still owns the warehouse SCHEMA (dacpac / SqlPackage).
+# Publishing the Warehouse here creates the item shell only; the tables and
+# procedures inside it come from the dacpac, which needs .NET, SqlPackage and an
+# ODBC driver that nothing in this file installs.
 #
-# They used to be, for one reason only: fabric-cicd resolves a
-# $items.<Type>.<name>.$id variable only when <Type> is in scope for that run.
-# Existing in the workspace is not enough -- a run scoped to ["Warehouse"] still
-# fails with "Attribute value not found for Lakehouse 'test_LH'" while test_LH is
-# sitting right there. So two GUIDs were dragging two item types into scope.
+# WHY ONE JOB, ONE PUBLISH
+# ------------------------
+# The Lakehouse used to be published by a separate deploy-lakehouse.yml that had
+# to run BEFORE this workflow, with no way to enforce that. Two orderings broke:
+# the lakehouse had to exist before its id could be resolved, and
+# nb_lakehouse_schema had to be published before the schema run could trigger it.
+# Merging them turns a race into a sequence of steps.
 #
-# cicd/resolve_ids.py now reads those two ids straight from the Fabric API and
-# writes them into the staged parameter.yml before publishing, which breaks the
-# coupling. $workspace.$id still resolves through fabric-cicd -- it needs nothing
-# in scope.
+# WHY WAREHOUSE AND LAKEHOUSE ARE IN --items-in-scope
+# ---------------------------------------------------
+# fabric-cicd resolves a $items.<Type>.<name>.$id variable only when <Type> is in
+# scope for that run. Existing in the workspace is not enough — a run scoped to
+# ["Notebook"] fails with "Attribute value not found for Lakehouse 'test_LH'"
+# while test_LH is sitting right there. parameter.yml needs both ids, so both
+# types are in scope. That is the whole reason; nothing here changes a store's
+# contents. ($workspace.$id needs nothing in scope.)
 
 on:
   push:
-    branches: [test]
+    branches: [dev, test]
     paths-ignore:
+      # A warehouse-only change is a schema change — deploy-warehouse.yml's job.
+      # This workflow still publishes the item shell whenever it runs for any
+      # other reason, which is idempotent.
       - 'fabric/*.Warehouse/**'
-      - 'fabric/*.Lakehouse/**'
   workflow_dispatch:
     inputs:
+      environment:
+        description: 'Workspace to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+        default: test
+      ref:
+        description: 'Tag or commit SHA to deploy (blank = current branch head)'
+        required: false
+        type: string
+        default: ''
       items_in_scope:
         description: 'JSON array of item types to publish'
         required: false
-        default: '["Notebook","DataPipeline","SemanticModel","Report"]'
+        default: '["Lakehouse","Warehouse","Notebook","DataPipeline","SemanticModel","Report"]'
+      run_job:
+        description: 'Item to run after deploy, as Name:Type (e.g. pl_ingest:DataPipeline)'
+        required: false
+        type: string
+        default: ''
       unpublish_orphans:
-        description: 'Delete workspace items no longer present in the repo'
+        description: 'DANGER: deletes workspace items absent from the repo, stores included'
         required: false
         default: 'false'
 
@@ -39,8 +66,12 @@ permissions:
   contents: read
   id-token: write
 
-env:
-  TARGET_ENV: ${{ github.ref_name }}
+concurrency:
+  # Keyed on the target workspace, not the branch: a dispatch of dev and a push
+  # to test publish into different workspaces and must not queue behind each
+  # other. Never cancelled — a half-applied publish is worse than a slow one.
+  group: deploy-to-fabric-${{ inputs.environment || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
 
@@ -48,8 +79,17 @@ jobs:
     name: Validate repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      target_env: ${{ steps.target.outputs.env }}
+
     steps:
+      # inputs.ref lets a dispatch redeploy an older tag. The workflow file
+      # itself always comes from the branch the run was started on, so an old
+      # tag is published by today's pipeline rather than the pipeline that
+      # shipped with it.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -58,90 +98,50 @@ jobs:
       - name: Install validation dependencies
         run: pip install pyyaml
 
-      - name: Required directories exist
+      # A push carries no inputs at all, so the branch name is the environment.
+      # A dispatch always has the dropdown, which is what makes deploying a tag
+      # possible: github.ref_name would be "v1.2.0" there, which is neither a
+      # workspace nor a parameter.yml key.
+      - name: Resolve target environment
+        id: target
         run: |
-          for d in fabric cicd fabric/insurance_WH.Warehouse; do
-            [ -d "$d" ] || { echo "::error::Missing directory: $d"; exit 1; }
-          done
+          TARGET="${{ inputs.environment }}"
+          TARGET="${TARGET:-${{ github.ref_name }}}"
+          case "$TARGET" in
+            dev|test) ;;
+            *)
+              echo "::error::Unsupported environment '$TARGET'. Expected dev or test."
+              echo "::error::Running from a tag? Use Run workflow and pick the environment."
+              exit 1
+              ;;
+          esac
+          echo "env=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Target environment : $TARGET"
+          echo "Deploying ref      : ${{ inputs.ref || github.ref }}"
 
-      - name: Required scripts exist
-        run: |
-          for f in cicd/deploy.py cicd/grant_and_get_endpoints.py \
-                   cicd/resolve_ids.py \
-                   cicd/parameter.yml cicd/requirements.txt; do
-            [ -f "$f" ] || { echo "::error::Missing file: $f"; exit 1; }
-          done
+      - name: Validate repository
+        run: python cicd/validate_repo.py --target-env "${{ steps.target.outputs.env }}"
 
-      - name: parameter.yml is valid for this environment
-        run: |
-          python - <<'PY'
-          import re, sys, yaml, pathlib
-
-          target = "${{ github.ref_name }}"
-          doc = yaml.safe_load(pathlib.Path("cicd/parameter.yml").read_text()) or {}
-          errors = []
-
-          for section in ("find_replace", "key_value_replace"):
-              for i, rule in enumerate(doc.get(section, []), start=1):
-                  where = f"{section}[{i}]"
-                  key = rule.get("find_value", rule.get("find_key", ""))
-
-                  if "<" in str(key) and ">" in str(key):
-                      errors.append(f"{where}: unfilled placeholder in {key!r}")
-
-                  replace = rule.get("replace_value") or {}
-                  if target not in replace and not any(
-                          k.lower() == "_all_" for k in replace):
-                      errors.append(f"{where}: no '{target}' key in replace_value")
-
-                  # A regex find_value must compile and expose exactly one group,
-                  # because group 1 is always the replacement target.
-                  if str(rule.get("is_regex", "")).lower() == "true":
-                      try:
-                          compiled = re.compile(rule["find_value"])
-                      except re.error as exc:
-                          errors.append(f"{where}: regex does not compile - {exc}")
-                          continue
-                      if compiled.groups != 1:
-                          errors.append(
-                              f"{where}: regex has {compiled.groups} capture groups, "
-                              f"expected exactly 1")
-
-          for e in errors:
-              print(f"::error::{e}")
-          sys.exit(1 if errors else 0)
-          PY
-
-      - name: Reports using byConnection have a matching rule
-        run: |
-          python - <<'PY'
-          import json, pathlib, sys, yaml
-
-          doc = yaml.safe_load(pathlib.Path("cicd/parameter.yml").read_text()) or {}
-          rules = " ".join(str(r.get("find_value", ""))
-                           for r in doc.get("find_replace", []))
-          problems = []
-
-          for pbir in pathlib.Path("fabric").rglob("definition.pbir"):
-              content = json.loads(pbir.read_text())
-              ref = (content.get("datasetReference") or {})
-              if ref.get("byConnection") and "byConnection" not in rules:
-                  problems.append(f"{pbir} uses byConnection with no find_replace rule")
-
-          for p in problems:
-              print(f"::error::{p}")
-          sys.exit(1 if problems else 0)
-          PY
-
-  deploy_to_test:
-    name: Deploy to ${{ github.ref_name }}
+  deploy:
+    name: Deploy to ${{ needs.validate.outputs.target_env }}
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: ${{ github.ref_name }}
+    timeout-minutes: 60
+    environment: ${{ needs.validate.outputs.target_env }}
+
+    env:
+      TARGET_ENV: ${{ needs.validate.outputs.target_env }}
+      SCHEMA_NOTEBOOK: nb_lakehouse_schema
+      RUN_JOB: ${{ inputs.run_job }}
+      ITEMS_IN_SCOPE: >-
+        ${{ inputs.items_in_scope
+            || '["Lakehouse","Warehouse","Notebook","DataPipeline","SemanticModel","Report"]' }}
+      UNPUBLISH_ORPHANS: ${{ inputs.unpublish_orphans || 'false' }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -150,20 +150,30 @@ jobs:
       - name: Install deployment dependencies
         run: pip install -r cicd/requirements.txt
 
-      - name: Resolve GIT_DIRECTORY
+      # One place resolves everything that is keyed on the environment, so no
+      # later step has to repeat the vars[format(...)] lookup and risk drifting
+      # from this one.
+      - name: Resolve workspace and git directory
         run: |
           GITDIR="${{ vars.GIT_DIRECTORY }}"
           GITDIR="${GITDIR:-fabric}"
-          echo "GITDIR=$GITDIR" >> "$GITHUB_ENV"
-          echo "Publishing from: $GITDIR"
+          WS_ID="${{ vars[format('{0}_WORKSPACE_ID', needs.validate.outputs.target_env)] }}"
+          WS_NAME="${{ vars[format('{0}_WORKSPACE_NAME', needs.validate.outputs.target_env)] }}"
 
-      - name: Stage parameter.yml
-        run: |
-          # fabric-cicd only reads parameter.yml from the root of the git
-          # directory. cicd/parameter.yml stays the source of truth; this copy
-          # lives on the runner only and is never committed.
-          cp cicd/parameter.yml "$GITDIR/parameter.yml"
-          echo "Staged to $GITDIR/parameter.yml"
+          # An unset repository variable expands to empty, and every step below
+          # would then quietly target nothing. Adding the dev environment is
+          # exactly when this is easy to forget.
+          [ -n "$WS_ID" ]   || { echo "::error::Repository variable ${TARGET_ENV}_WORKSPACE_ID is not set"; exit 1; }
+          [ -n "$WS_NAME" ] || { echo "::error::Repository variable ${TARGET_ENV}_WORKSPACE_NAME is not set"; exit 1; }
+
+          {
+            echo "GITDIR=$GITDIR"
+            echo "WORKSPACE_ID=$WS_ID"
+            echo "WORKSPACE_NAME=$WS_NAME"
+          } >> "$GITHUB_ENV"
+
+          echo "Publishing from : $GITDIR"
+          echo "Into workspace  : $WS_NAME ($WS_ID)"
 
       - name: Azure login (Reader SP via OIDC)
         uses: azure/login@v3
@@ -187,45 +197,64 @@ jobs:
             echo "$var=$value" >> "$GITHUB_ENV"
           done
 
-      # Turns $items.Warehouse.<name>.$id / $items.Lakehouse.<name>.$id in the
-      # staged copy into real GUIDs read from the target workspace, so neither
-      # type has to enter --items-in-scope below. Fails loudly if a store is
-      # missing rather than letting the literal token reach the deployed item.
-      - name: Resolve store ids into the staged parameter.yml
+      - name: Stage parameter.yml
         run: |
-          python cicd/resolve_ids.py \
-            --workspace-id "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
-            --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
-            --parameter-file "$GITDIR/parameter.yml"
+          # fabric-cicd only reads parameter.yml from the root of the git
+          # directory. cicd/parameter.yml stays the source of truth; this copy
+          # lives on the runner only and is never committed.
+          cp cicd/parameter.yml "$GITDIR/parameter.yml"
+          echo "Staged to $GITDIR/parameter.yml"
 
       - name: Publish items
-        env:
-          ITEMS_IN_SCOPE: >-
-            ${{ github.event.inputs.items_in_scope
-                || '["Notebook","DataPipeline","SemanticModel","Report"]' }}
-          UNPUBLISH_ORPHANS: ${{ github.event.inputs.unpublish_orphans || 'false' }}
         run: |
-          # No Warehouse, no Lakehouse: their ids are already literal GUIDs in
-          # the staged parameter.yml, so nothing here needs them in scope. This
-          # workflow never touches a store item.
+          # Warehouse and Lakehouse are in scope so parameter.yml can read their
+          # ids — which also puts them within reach of unpublish_orphans. It
+          # defaults to false; turning it on deletes stores, and their data with
+          # them, if the repo no longer carries the item folder.
           python cicd/deploy.py \
             --target-env "$TARGET_ENV" \
-            --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
+            --workspace-name "$WORKSPACE_NAME" \
             --git-directory "$GITDIR" \
             --items-in-scope "$ITEMS_IN_SCOPE" \
             --unpublish-orphans "$UNPUBLISH_ORPHANS"
+
+      # The lakehouse equivalent of the warehouse dacpac publish. Runs after the
+      # publish because the notebook it triggers is created by that step —
+      # deliberately NOT --skip-if-missing, since a missing notebook now means
+      # the publish dropped it, not that another workflow has yet to run.
+      - name: Apply lakehouse schema
+        run: |
+          python cicd/trigger_job.py \
+            --workspace-id "$WORKSPACE_ID" \
+            --item-name "$SCHEMA_NOTEBOOK" \
+            --item-type Notebook \
+            --wait \
+            --timeout-minutes 20
+
+      - name: Run post-deploy job
+        if: ${{ inputs.run_job != '' }}
+        run: |
+          python cicd/trigger_job.py \
+            --workspace-id "$WORKSPACE_ID" \
+            --item-name "${RUN_JOB%%:*}" \
+            --item-type "${RUN_JOB##*:}" \
+            --wait
 
       - name: Deployment summary
         if: always()
         run: |
           {
-            echo "## Deployment to ${{ github.ref_name }}"
+            echo "## Deployment to ${TARGET_ENV}"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| Workspace | ${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }} |"
+            echo "| Workspace | ${WORKSPACE_NAME:-unresolved} |"
+            echo "| Ref | \`${{ inputs.ref || github.ref }}\` |"
             echo "| Commit | \`${{ github.sha }}\` |"
-            echo "| Git directory | \`$GITDIR\` |"
+            echo "| Git directory | \`${GITDIR:-unresolved}\` |"
+            echo "| Items in scope | \`${ITEMS_IN_SCOPE}\` |"
+            echo "| Schema notebook | \`${SCHEMA_NOTEBOOK}\` |"
+            echo "| Post-deploy job | \`${RUN_JOB:-none}\` |"
             echo ""
             echo "### Verify"
             echo ""
@@ -233,8 +262,8 @@ jobs:
             echo "  **this** workspace, not dev."
             echo "- Open \`nb_lakehouse_schema\` lineage: exactly **one** lakehouse."
             echo "  Two means the known_lakehouses rule stopped matching."
-            echo "- A verbatim \`\$items.\` token in a deployed definition means"
-            echo "  resolve_ids.py did not rewrite it - check that step's log."
+            echo "- A verbatim \`\$items.\` token in a deployed definition means the"
+            echo "  item type left --items-in-scope - check ITEMS_IN_SCOPE above."
             echo ""
             echo "### Manual steps (deliberately not automated)"
             echo ""

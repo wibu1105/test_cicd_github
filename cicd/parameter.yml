@@ -1,14 +1,23 @@
 # cicd/parameter.yml
 #
 # Script-free parameterisation: every environment-specific id, workspace id and
-# OneLake path is resolved by fabric-cicd at deploy time from dynamic variables.
-# No GUID is written down here, and cicd/resolve_ids.py is no longer needed.
+# OneLake path is resolved at deploy time from dynamic variables. No GUID is
+# written down here.
 #
-# REQUIREMENT: the workflow that publishes these items must include Warehouse and
-# Lakehouse in --items-in-scope. A $items.<Type>.<name>.$<attr> variable only
-# resolves when that item type is in scope for the run. Warehouse and Lakehouse
-# still get their schema from deploy-warehouse.yml / deploy-lakehouse.yml -- being
-# in scope here only publishes the item shell.
+# REQUIREMENT: the workflow that publishes these items must have Warehouse and
+# Lakehouse in --items-in-scope. A $items.<Type>.<name>.$<attr> variable resolves
+# only when that type is in scope for the run — existing in the workspace is not
+# enough, and a run without them fails with "Attribute value not found for
+# Lakehouse 'test_LH'". deploy-to-fabric.yml keeps both in scope for exactly this
+# reason; being in scope publishes the item shell and nothing else. The schema
+# inside each store still comes from deploy-warehouse.yml (dacpac) and the
+# nb_lakehouse_schema run. $workspace.$id needs nothing in scope.
+#
+# EVERY RULE NEEDS A KEY PER ENVIRONMENT (dev, test). A missing key fails
+# cicd/validate_repo.py before anything is published. The values are identical
+# across environments on purpose: these are dynamic variables, so each resolves
+# against whichever workspace the run targets. Adding an environment means
+# copying the line, not inventing a GUID for it.
 #
 # Item type and item name are CASE SENSITIVE and must match the repo folder names.
 #
@@ -25,11 +34,13 @@ key_value_replace:
   # ------------------------------------------------------------------
   - find_key: $.properties.activities[?(@.name=="Notebook1")].typeProperties.notebookId
     replace_value:
+      dev:  "$items.Notebook.nb_transform.$id"
       test: "$items.Notebook.nb_transform.$id"
     item_type: "DataPipeline"
 
   - find_key: $.properties.activities[?(@.name=="Notebook1")].typeProperties.workspaceId
     replace_value:
+      dev:  "$workspace.$id"
       test: "$workspace.$id"
     item_type: "DataPipeline"
 
@@ -55,6 +66,7 @@ find_replace:
   - find_value: 'onelake\.dfs\.fabric\.microsoft\.com/([0-9a-fA-F-]{36})/'
     is_regex: "true"
     replace_value:
+      dev:  "$workspace.$id"
       test: "$workspace.$id"
     item_type: "SemanticModel"
 
@@ -62,6 +74,7 @@ find_replace:
   - find_value: 'onelake\.dfs\.fabric\.microsoft\.com/[0-9a-fA-F-]{36}/([0-9a-fA-F-]{36})'
     is_regex: "true"
     replace_value:
+      dev:  "$items.Warehouse.insurance_WH.$id"
       test: "$items.Warehouse.insurance_WH.$id"
     item_type: "SemanticModel"
 
@@ -81,6 +94,7 @@ find_replace:
   - find_value: '\#\s*META\s+"default_lakehouse":\s*"([0-9a-fA-F-]{36})"'
     is_regex: "true"
     replace_value:
+      dev:  "$items.Lakehouse.test_LH.$id"
       test: "$items.Lakehouse.test_LH.$id"
     item_type: "Notebook"
 
@@ -89,6 +103,7 @@ find_replace:
   - find_value: '\#\s*META\s+"default_lakehouse_workspace_id":\s*"([0-9a-fA-F-]{36})"'
     is_regex: "true"
     replace_value:
+      dev:  "$workspace.$id"
       test: "$workspace.$id"
     item_type: "Notebook"
 
@@ -107,6 +122,7 @@ find_replace:
   - find_value: '"known_lakehouses":\s*\[\s*\#\s*META\s*\{\s*\#\s*META\s+"id":\s*"([0-9a-fA-F-]{36})"'
     is_regex: "true"
     replace_value:
+      dev:  "$items.Lakehouse.test_LH.$id"
       test: "$items.Lakehouse.test_LH.$id"
     item_type: "Notebook"
 

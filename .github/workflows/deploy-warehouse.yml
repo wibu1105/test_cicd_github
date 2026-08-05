@@ -1,28 +1,55 @@
 # .github/workflows/deploy-warehouse.yml
-# Runs only when warehouse files change.
+#
+# The warehouse SCHEMA only: dacpac build, SqlPackage publish, backfill procs.
+# It is separate from deploy-to-fabric.yml because it is the one pipeline that
+# needs .NET, SqlPackage and msodbcsql18 — a toolchain nothing else installs.
+#
+# It does NOT create the Warehouse item. deploy-to-fabric.yml publishes every
+# item shell, this one fills the warehouse in. That split is what keeps the two
+# workflows from writing the same item at once when a commit touches both.
+#
+# CONSEQUENCE: a warehouse-only push does not trigger deploy-to-fabric.yml
+# (paths-ignore), so a brand-new warehouse has to be created by running
+# deploy-to-fabric.yml once — by dispatch, or by any push that touches something
+# outside fabric/*.Warehouse/**. Until then this workflow fails on the endpoint
+# lookup, which lists the warehouses that do exist.
 
 name: Deploy warehouse
 
 on:
   push:
-    branches: [test]
+    branches: [dev, test]
     paths:
       # Not 'fabric/**/*.Warehouse/**' — GitHub's '**' is a character wildcard,
       # so '**/' still needs a literal '/', which would require the item to sit
       # two levels deep. Fabric items live directly under fabric/.
       - 'fabric/*.Warehouse/**'
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Workspace to deploy to'
+        required: true
+        type: choice
+        options:
+          - dev
+          - test
+        default: test
+      ref:
+        description: 'Tag or commit SHA to deploy (blank = current branch head)'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
   id-token: write
 
 concurrency:
-  group: deploy-warehouse-${{ github.ref_name }}
+  # Keyed on the target workspace rather than the branch — see deploy-to-fabric.yml.
+  group: deploy-warehouse-${{ inputs.environment || github.ref_name }}
   cancel-in-progress: false
 
 env:
-  TARGET_ENV: ${{ github.ref_name }}
   WAREHOUSE: insurance_WH
   POPULATE_PROCS: >-
     Bronze.usp_populate_new_columns
@@ -33,9 +60,13 @@ jobs:
     name: Validate repository structure
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      target_env: ${{ steps.target.outputs.env }}
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v7
         with:
@@ -43,18 +74,42 @@ jobs:
 
       - run: pip install pyyaml
 
+      # A push carries no inputs, so the branch name is the environment. A
+      # dispatch always has the dropdown — which is what makes deploying a tag
+      # possible, since github.ref_name would be "v1.2.0" there.
+      - name: Resolve target environment
+        id: target
+        run: |
+          TARGET="${{ inputs.environment }}"
+          TARGET="${TARGET:-${{ github.ref_name }}}"
+          case "$TARGET" in
+            dev|test) ;;
+            *)
+              echo "::error::Unsupported environment '$TARGET'. Expected dev or test."
+              exit 1
+              ;;
+          esac
+          echo "env=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Target environment : $TARGET"
+          echo "Deploying ref      : ${{ inputs.ref || github.ref }}"
+
       - name: Validate repository
-        run: python cicd/validate_repo.py --target-env "$TARGET_ENV"
+        run: python cicd/validate_repo.py --target-env "${{ steps.target.outputs.env }}"
 
   deploy:
     name: Publish warehouse schema
     needs: validate
     runs-on: ubuntu-latest
-    environment: ${{ github.ref_name }}
+    environment: ${{ needs.validate.outputs.target_env }}
     timeout-minutes: 40
+
+    env:
+      TARGET_ENV: ${{ needs.validate.outputs.target_env }}
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref || github.ref }}
 
       - uses: actions/setup-python@v7
         with:
@@ -63,6 +118,21 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: "8.x"
+
+      # One place resolves everything keyed on the environment, so no later step
+      # repeats the vars[format(...)] lookup and drifts from this one. An unset
+      # variable expands to empty, which would otherwise deploy into nothing.
+      - name: Resolve target workspace
+        run: |
+          WS_ID="${{ vars[format('{0}_WORKSPACE_ID', needs.validate.outputs.target_env)] }}"
+          WS_NAME="${{ vars[format('{0}_WORKSPACE_NAME', needs.validate.outputs.target_env)] }}"
+          [ -n "$WS_ID" ]   || { echo "::error::Repository variable ${TARGET_ENV}_WORKSPACE_ID is not set"; exit 1; }
+          [ -n "$WS_NAME" ] || { echo "::error::Repository variable ${TARGET_ENV}_WORKSPACE_NAME is not set"; exit 1; }
+          {
+            echo "WORKSPACE_ID=$WS_ID"
+            echo "WORKSPACE_NAME=$WS_NAME"
+          } >> "$GITHUB_ENV"
+          echo "Into workspace : $WS_NAME ($WS_ID)"
 
       - name: Install tooling
         run: |
@@ -87,29 +157,16 @@ jobs:
             echo "AZURE_$(echo "$name" | tr 'a-z-' 'A-Z_')=$value" >> "$GITHUB_ENV"
           done
 
-      # parameter.yml is deliberately NOT staged here. Every rule in it targets
-      # DataPipeline, SemanticModel or Notebook — none target Warehouse — so it
-      # can only ever be dead weight for this run. Worse, fabric-cicd resolves
-      # every dynamic variable in the file up front, and $items.Lakehouse.test_LH.$id
-      # cannot resolve when Lakehouse is outside --items-in-scope. Staging it
-      # fails the run with "Attribute value not found for Lakehouse 'test_LH'".
-      # deploy-to-fabric.yml owns parameterisation; this workflow owns the schema.
-      - name: Deploy Warehouse item
-        run: |
-          # Gitignored, so a fresh checkout has none — but a stray copy would
-          # reintroduce exactly the failure described above.
-          rm -f fabric/parameter.yml
-          python cicd/deploy.py \
-            --target-env "$TARGET_ENV" \
-            --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
-            --git-directory fabric \
-            --items-in-scope '["Warehouse"]' \
-            --unpublish-orphans false
-
+      # This workflow does not publish the Warehouse ITEM — deploy-to-fabric.yml
+      # is the only thing that creates it, so the two can never publish the same
+      # item shell concurrently on a commit that touches both. There is nothing
+      # to order around: fabric-cicd is not called here at all, and the step
+      # below fails with the list of warehouses actually present if the item is
+      # not there yet.
       - name: Resolve SQL endpoint
         run: |
           python cicd/grant_and_get_endpoints.py \
-            --workspace-id "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
+            --workspace-id "$WORKSPACE_ID" \
             --warehouse-names "$WAREHOUSE"
 
       # GITHUB_ENV only takes effect in later steps, so the check lives here.

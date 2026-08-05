@@ -25,7 +25,7 @@ def main():
     parser.add_argument(
         "--items-in-scope",
         required=False,
-        default='["Notebook","DataPipeline","Warehouse","SemanticModel","Report"]',
+        default='["Lakehouse","Warehouse","Notebook","DataPipeline","SemanticModel","Report"]',
         help="JSON array of Fabric item types to deploy"
     )
     parser.add_argument(

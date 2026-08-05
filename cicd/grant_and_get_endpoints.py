@@ -82,10 +82,15 @@ def get_warehouse_endpoints(
 
     missing = set(warehouse_names) - set(found.keys())
     if missing:
+        # deploy-warehouse.yml no longer publishes the item itself, so this is
+        # where a workspace that has never had deploy-to-fabric.yml run against
+        # it shows up — as a missing warehouse rather than a failed publish.
         raise ValueError(
             f"The following warehouses were not found in workspace {workspace_id}: "
             f"{', '.join(missing)}\n"
-            f"Warehouses available: {[w['displayName'] for w in warehouses]}"
+            f"Warehouses available: {[w['displayName'] for w in warehouses]}\n"
+            f"The Warehouse item is created by deploy-to-fabric.yml — run that "
+            f"once against this workspace first."
         )
 
     return found
