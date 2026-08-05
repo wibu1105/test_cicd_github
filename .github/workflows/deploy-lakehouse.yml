@@ -89,9 +89,15 @@ jobs:
       # Chỉ item Lakehouse. Notebook/DataPipeline/SemanticModel/Report luôn do
       # deploy-to-fabric.yml deploy. Tắt unpublish orphan vì đây là deploy phạm
       # vi hẹp, không được phép xoá gì.
+      # parameter.yml is deliberately NOT staged here — same reason as
+      # deploy-warehouse.yml. No rule in it targets Lakehouse, and fabric-cicd
+      # resolves every dynamic variable in the file up front, so
+      # $items.Warehouse.insurance_WH.$sqlendpoint would fail to resolve with
+      # only Lakehouse in --items-in-scope. deploy-to-fabric.yml owns
+      # parameterisation; this workflow owns the schema.
       - name: Deploy Lakehouse item
         run: |
-          cp cicd/parameter.yml fabric/parameter.yml
+          rm -f fabric/parameter.yml
           python cicd/deploy.py \
             --target-env "$TARGET_ENV" \
             --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \

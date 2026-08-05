@@ -87,9 +87,18 @@ jobs:
             echo "AZURE_$(echo "$name" | tr 'a-z-' 'A-Z_')=$value" >> "$GITHUB_ENV"
           done
 
+      # parameter.yml is deliberately NOT staged here. Every rule in it targets
+      # DataPipeline, SemanticModel or Notebook — none target Warehouse — so it
+      # can only ever be dead weight for this run. Worse, fabric-cicd resolves
+      # every dynamic variable in the file up front, and $items.Lakehouse.test_LH.$id
+      # cannot resolve when Lakehouse is outside --items-in-scope. Staging it
+      # fails the run with "Attribute value not found for Lakehouse 'test_LH'".
+      # deploy-to-fabric.yml owns parameterisation; this workflow owns the schema.
       - name: Deploy Warehouse item
         run: |
-          cp cicd/parameter.yml fabric/parameter.yml
+          # Gitignored, so a fresh checkout has none — but a stray copy would
+          # reintroduce exactly the failure described above.
+          rm -f fabric/parameter.yml
           python cicd/deploy.py \
             --target-env "$TARGET_ENV" \
             --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
