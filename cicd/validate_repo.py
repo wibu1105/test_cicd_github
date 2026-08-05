@@ -287,6 +287,46 @@ def entry_matches(entry, text):
     return fv in text
 
 
+def covered_at(entries, text, start, end):
+    """Does some find_replace rule rewrite exactly the text[start:end] span?
+
+    entry_matches only answers "does this rule match the file somewhere", which
+    is too weak once the same GUID appears twice: a rule covering the first
+    occurrence says nothing about the second. fabric-cicd only ever substitutes
+    capture group 1, so a span is covered only when some rule's group 1 encloses
+    it.
+    """
+    for entry in entries:
+        fv = str(entry.get("find_value", ""))
+        if not fv:
+            continue
+        if str(entry.get("is_regex", "")).lower() == "true":
+            try:
+                matches = list(re.finditer(fv, text))
+            except re.error:
+                continue
+            for m in matches:
+                try:
+                    g_start, g_end = m.span(1)
+                except IndexError:
+                    continue
+                if g_start != -1 and g_start <= start and g_end >= end:
+                    return True
+        else:
+            idx = text.find(fv)
+            while idx != -1:
+                if idx <= start and idx + len(fv) >= end:
+                    return True
+                idx = text.find(fv, idx + 1)
+    return False
+
+
+# A Direct Lake model reads OneLake directly, so it carries no SQL endpoint
+# hostname for WAREHOUSE_HOST_RE to find. Both path segments are per-workspace.
+ONELAKE_PATH_RE = re.compile(
+    r"onelake\.dfs\.fabric\.microsoft\.com/([0-9a-fA-F-]{36})/([0-9a-fA-F-]{36})")
+
+
 def check_parameterisation_coverage(rep, entries, target_env):
     print("\n[5] Parameterisation coverage")
 
@@ -317,8 +357,28 @@ def check_parameterisation_coverage(rep, entries, target_env):
                     f"After deployment this item would still read from the dev warehouse.",
                     file=str(f))
 
+        # Direct Lake models never mention a SQL endpoint, so the hostname scan
+        # above cannot see them. sales_semantic_model is one: its source is a
+        # OneLake path carrying the dev workspace id and the dev warehouse id.
+        for m in ONELAKE_PATH_RE.finditer(text):
+            for label, group in (("workspace", 1), ("item", 2)):
+                findings += 1
+                g_start, g_end = m.span(group)
+                if covered_at(entries, text, g_start, g_end):
+                    rep.ok(f"{f.relative_to(FABRIC_DIR)}: OneLake {label} id "
+                           f"covered by a parameter.yml rule")
+                else:
+                    rep.error(
+                        "coverage",
+                        f"{f.relative_to(FABRIC_DIR)} pins {m.group(group)} as the "
+                        f"{label} id of a OneLake path, with no find_replace rule "
+                        f"covering that occurrence for '{target_env}'. After "
+                        f"deployment this item would still read from the dev "
+                        f"workspace.",
+                        file=str(f))
+
     if findings == 0:
-        rep.ok("No hardcoded warehouse endpoints found in item definitions")
+        rep.ok("No hardcoded warehouse endpoints or OneLake paths found in item definitions")
 
 
 # ----------------------------------------------------------------------
@@ -350,6 +410,11 @@ ATTACHED_GUID_RE = re.compile(
 # header without it cannot be repointed at deploy time.
 STORE_NAME_RE = re.compile(
     r'"default_(?:lakehouse|warehouse)_name"\s*:\s*"([^"]+)"')
+# Fabric repeats the store id a second time inside known_lakehouses /
+# known_warehouses, under a bare "id" key that ATTACHED_GUID_RE cannot see.
+# Within a notebook's metadata this key occurs nowhere else, so matching it
+# directly needs no block parsing and works for both "# META" and "-- META".
+KNOWN_STORE_ID_RE = re.compile(r'"id"\s*:\s*"([0-9a-fA-F-]{36})"')
 
 
 def repo_logical_ids():
@@ -395,6 +460,28 @@ def check_notebooks(rep, entries, target_env):
                 f'("insurance_WH") — so the same file works in every workspace.',
                 file=str(f))
             continue
+
+        # Rewriting default_lakehouse but not its twin inside known_lakehouses
+        # leaves the notebook attached to BOTH stores — the target one and the
+        # one it was authored against. Fabric shows that as the same store name
+        # twice in the lineage view, in two different workspaces.
+        for m in KNOWN_STORE_ID_RE.finditer(text):
+            guid = m.group(1)
+            g_start, g_end = m.span(1)
+            owner = logical_ids.get(guid)
+            if owner:
+                rep.ok(f"{name}: known store {guid} is {owner}'s logicalId")
+            elif covered_at(entries, text, g_start, g_end):
+                rep.ok(f"{name}: known store {guid} is rewritten by parameter.yml")
+            else:
+                rep.error(
+                    "notebook",
+                    f"{name} repeats {guid} under known_lakehouses/known_warehouses "
+                    f"with no find_replace rule covering that occurrence for "
+                    f"'{target_env}', and it is not an item's logicalId. After "
+                    f"deploy the notebook would stay attached to the workspace it "
+                    f"was authored in, alongside the target one.",
+                    file=str(f))
 
         attached = ATTACHED_GUID_RE.findall(text)
         if attached:

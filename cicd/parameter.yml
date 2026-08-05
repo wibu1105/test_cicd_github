@@ -1,7 +1,7 @@
 # cicd/parameter.yml
 #
 # Script-free parameterisation: every environment-specific id, workspace id and
-# SQL endpoint is resolved by fabric-cicd at deploy time from dynamic variables.
+# OneLake path is resolved by fabric-cicd at deploy time from dynamic variables.
 # No GUID is written down here, and cicd/resolve_ids.py is no longer needed.
 #
 # REQUIREMENT: the workflow that publishes these items must include Warehouse and
@@ -11,6 +11,9 @@
 # in scope here only publishes the item shell.
 #
 # Item type and item name are CASE SENSITIVE and must match the repo folder names.
+#
+# Every regex must have EXACTLY ONE capture group: fabric-cicd only ever replaces
+# group 1. Anything else you need to keep must sit outside the parentheses.
 
 key_value_replace:
 
@@ -33,38 +36,49 @@ key_value_replace:
 find_replace:
 
   # ==================================================================
-  # 1. Semantic model -> warehouse connection
+  # 1. Semantic model -> warehouse, over OneLake (Direct Lake)
   #
-  # Two single-capture-group rules instead of one combined rule: a regex
-  # find_value may only use capture group 1 as the replacement target, so
-  # hostname and database GUID each need their own rule. Rule 2 still matches
-  # after rule 1 runs, because the test endpoint has the same hostname shape.
+  # sales_semantic_model is a DIRECT LAKE model. Its source is a OneLake path,
+  # not a SQL endpoint:
+  #
+  #   AzureStorage.DataLake("https://onelake.dfs.fabric.microsoft.com/<workspace>/<item>")
+  #
+  # The string "Sql.Database" appears nowhere in this repo, so rules written
+  # against it match nothing and the model deploys still reading dev's OneLake.
+  # The path carries two GUIDs and each needs its own single-group rule.
+  #
+  # Order does not matter: rule 1b matches on GUID shape, so it still finds the
+  # item segment after 1a has swapped the workspace segment for another GUID.
   # ==================================================================
 
-  # 1a. hostname -> SQL endpoint of insurance_WH in the target workspace
-  - find_value: 'Sql\.Database\("([a-zA-Z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com)"'
+  # 1a. first path segment -> the target workspace
+  - find_value: 'onelake\.dfs\.fabric\.microsoft\.com/([0-9a-fA-F-]{36})/'
     is_regex: "true"
     replace_value:
-      test: "$items.Warehouse.insurance_WH.$sqlendpoint"
+      test: "$workspace.$id"
     item_type: "SemanticModel"
 
-  # 1b. database GUID -> item id of insurance_WH in the target workspace
-  - find_value: 'Sql\.Database\("[a-zA-Z0-9\-]+\.datawarehouse\.fabric\.microsoft\.com",\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"'
+  # 1b. second path segment -> item id of insurance_WH in the target workspace
+  - find_value: 'onelake\.dfs\.fabric\.microsoft\.com/[0-9a-fA-F-]{36}/([0-9a-fA-F-]{36})'
     is_regex: "true"
     replace_value:
       test: "$items.Warehouse.insurance_WH.$id"
     item_type: "SemanticModel"
 
   # ==================================================================
-  # 2. Notebook attached store -> lakehouse / warehouse in the target workspace
+  # 2. nb_lakehouse_schema -> its attached lakehouse
   #
-  # The GUID is matched through its surrounding METADATA context, never on GUID
-  # shape alone -- a bare GUID pattern would happily rewrite any other GUID in
-  # the file. Add one pair of rules per attached store.
+  # Fabric writes the attached lakehouse's REAL ITEM ID here, not the logicalId
+  # from .platform, so it does not travel between workspaces on its own. (The
+  # warehouse block in nb_transform is not symmetric -- see section 3.)
+  #
+  # Each GUID is matched through its surrounding METADATA context, never on GUID
+  # shape alone: a bare GUID pattern would happily rewrite any other GUID in the
+  # file.
   # ==================================================================
 
-  # 2a. nb_lakehouse_schema (and any notebook attached to test_LH)
-  - find_value: '\#\s*META\s+"default_lakehouse":\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"'
+  # 2a. the default attachment
+  - find_value: '\#\s*META\s+"default_lakehouse":\s*"([0-9a-fA-F-]{36})"'
     is_regex: "true"
     replace_value:
       test: "$items.Lakehouse.test_LH.$id"
@@ -72,21 +86,42 @@ find_replace:
 
   # 2b. the workspace the attached lakehouse lives in
   #     Fabric rejects the notebook outright if this field is empty or stale.
-  - find_value: '\#\s*META\s+"default_lakehouse_workspace_id":\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"'
+  - find_value: '\#\s*META\s+"default_lakehouse_workspace_id":\s*"([0-9a-fA-F-]{36})"'
     is_regex: "true"
     replace_value:
       test: "$workspace.$id"
     item_type: "Notebook"
 
-  # 2c. nb_transform attached to the warehouse
-  - find_value: '\#\s*META\s+"default_warehouse":\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"'
+  # 2c. the SAME id again, inside known_lakehouses.
+  #
+  # Fabric repeats the lakehouse id under a bare "id" key a few lines below
+  # default_lakehouse. Rewriting 2a but not this one leaves the notebook
+  # attached to BOTH lakehouses -- the target one and the one it was authored
+  # against -- which is what Fabric's lineage view shows as two identically
+  # named lakehouses in two different workspaces.
+  #
+  # The pattern walks down from the "known_lakehouses" label so it can only ever
+  # touch that block; \s matches newlines in Python, so no regex flag is needed.
+  # Note it rewrites the FIRST entry only, which is all Fabric writes for a
+  # single attached lakehouse. Attaching a second one needs a second rule.
+  - find_value: '"known_lakehouses":\s*\[\s*\#\s*META\s*\{\s*\#\s*META\s+"id":\s*"([0-9a-fA-F-]{36})"'
     is_regex: "true"
     replace_value:
-      test: "$items.Warehouse.insurance_WH.$id"
+      test: "$items.Lakehouse.test_LH.$id"
     item_type: "Notebook"
 
-  - find_value: '\#\s*META\s+"default_warehouse_workspace_id":\s*"([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})"'
-    is_regex: "true"
-    replace_value:
-      test: "$workspace.$id"
-    item_type: "Notebook"
+  # ==================================================================
+  # 3. nb_transform -> insurance_WH: DELIBERATELY NO RULES
+  #
+  # Its default_warehouse is the logicalId recorded in
+  # fabric/insurance_WH.Warehouse/.platform, and Fabric resolves a logicalId to
+  # whichever item carries it in the target workspace. It is portable already.
+  #
+  # Two further reasons not to add rules here: nb_transform is a SQL notebook,
+  # so its metadata lines are prefixed "-- META", not "# META" -- rules copied
+  # from section 2 would silently never match. And the warehouse block has no
+  # default_warehouse_workspace_id field at all.
+  #
+  # Add rules only if a future notebook records a warehouse by item id instead;
+  # cicd/validate_repo.py fails the build when that happens.
+  # ==================================================================
