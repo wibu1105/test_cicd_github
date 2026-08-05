@@ -1,0 +1,159 @@
+# .github/workflows/deploy-warehouse.yml
+# Runs only when warehouse files change.
+
+name: Deploy warehouse
+
+on:
+  push:
+    branches: [test]
+    paths:
+      # Not 'fabric/**/*.Warehouse/**' — GitHub's '**' is a character wildcard,
+      # so '**/' still needs a literal '/', which would require the item to sit
+      # two levels deep. Fabric items live directly under fabric/.
+      - 'fabric/*.Warehouse/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-warehouse-${{ github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  TARGET_ENV: ${{ github.ref_name }}
+  WAREHOUSE: insurance_WH
+  POPULATE_PROCS: >-
+    Bronze.usp_populate_new_columns
+    Gold.usp_populate_new_columns
+
+jobs:
+  validate:
+    name: Validate repository structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyyaml
+
+      - name: Validate repository
+        run: python cicd/validate_repo.py --target-env "$TARGET_ENV"
+
+  deploy:
+    name: Publish warehouse schema
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref_name }}
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.x"
+
+      - name: Install tooling
+        run: |
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+          pip install -r cicd/requirements.txt
+          dotnet tool install --global microsoft.sqlpackage
+          echo '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' > global.json
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch Deploy SP credentials
+        run: |
+          for name in tenant-id client-id client-secret; do
+            value=$(az keyvault secret show --name "deploy-sp-$name" \
+              --vault-name "${{ secrets.AZURE_KEYVAULT_NAME }}" --query value -o tsv)
+            echo "::add-mask::$value"
+            echo "AZURE_$(echo "$name" | tr 'a-z-' 'A-Z_')=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Deploy Warehouse item
+        run: |
+          cp cicd/parameter.yml fabric/parameter.yml
+          python cicd/deploy.py \
+            --target-env "$TARGET_ENV" \
+            --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
+            --git-directory fabric \
+            --items-in-scope '["Warehouse"]' \
+            --unpublish-orphans false
+
+      - name: Resolve SQL endpoint
+        run: |
+          python cicd/grant_and_get_endpoints.py \
+            --workspace-id "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
+            --warehouse-names "$WAREHOUSE"
+
+      # GITHUB_ENV only takes effect in later steps, so the check lives here.
+      - name: Build dacpac
+        run: |
+          [ -n "${INSURANCE_WH_ENDPOINT:-}" ] || { echo "::error::endpoint not resolved"; exit 1; }
+          dotnet build fabric/$WAREHOUSE.Warehouse/$WAREHOUSE.sqlproj \
+            --configuration Release --output dacpac-out
+          CONN="Server=tcp:$INSURANCE_WH_ENDPOINT,1433;Initial Catalog=$WAREHOUSE;Encrypt=True;Connection Timeout=30;Authentication=Active Directory Service Principal;User Id=$AZURE_CLIENT_ID;Password=$AZURE_CLIENT_SECRET"
+          echo "::add-mask::$CONN"
+          echo "CONN=$CONN" >> "$GITHUB_ENV"
+
+      # Report + script are produced before anything is applied, so the run
+      # always has a record of what the publish was about to do.
+      - name: Preview changes
+        run: |
+          mkdir -p audit
+          for action in DeployReport:deploy-report.xml Script:deploy-script.sql; do
+            sqlpackage /Action:${action%%:*} \
+              /SourceFile:dacpac-out/$WAREHOUSE.dacpac \
+              /TargetConnectionString:"$CONN" \
+              /OutputPath:audit/${action##*:} \
+              /p:AllowIncompatiblePlatform=true \
+              /p:BlockOnPossibleDataLoss=true \
+              /p:DropObjectsNotInSource=false
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: warehouse-audit-${{ github.run_id }}
+          path: audit/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Publish schema
+        run: |
+          sqlpackage /Action:Publish \
+            /SourceFile:dacpac-out/$WAREHOUSE.dacpac \
+            /TargetConnectionString:"$CONN" \
+            /p:AllowIncompatiblePlatform=true \
+            /p:BlockOnPossibleDataLoss=true \
+            /p:DropObjectsNotInSource=false
+
+      # Backfill runs as plain SQL against the endpoint just published to.
+      - name: Populate new columns
+        run: |
+          for proc in $POPULATE_PROCS; do
+            echo "::group::$proc"
+            python cicd/run_sql.py \
+              --server "$INSURANCE_WH_ENDPOINT" \
+              --database "$WAREHOUSE" \
+              --procedure "$proc" \
+              --skip-if-missing
+            echo "::endgroup::"
+          done

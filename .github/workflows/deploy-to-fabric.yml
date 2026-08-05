@@ -1,0 +1,226 @@
+name: Deploy to Fabric
+
+# Everything that is not the Warehouse or the Lakehouse item itself.
+# deploy-warehouse.yml owns the warehouse schema (dacpac / SqlPackage) and
+# deploy-lakehouse.yml owns the lakehouse schema (nb_lakehouse_schema run).
+#
+# NOTE ON SCOPE: Warehouse and Lakehouse ARE included in --items-in-scope below,
+# even though this workflow does not own their schema. This is required, not
+# optional: parameter.yml resolves $items.Warehouse.insurance_WH.$sqlendpoint and
+# $items.Lakehouse.test_LH.$id, and fabric-cicd only resolves those variables for
+# item types inside the scope of the run. Without them, the semantic model and the
+# notebooks deploy silently still pointing at the dev workspace.
+# Including them publishes the item SHELL only -- no schema, no data.
+
+on:
+  push:
+    branches: [test]
+    paths-ignore:
+      - 'fabric/*.Warehouse/**'
+      - 'fabric/*.Lakehouse/**'
+  workflow_dispatch:
+    inputs:
+      items_in_scope:
+        description: 'JSON array of item types to publish'
+        required: false
+        default: '["Warehouse","Lakehouse","Notebook","DataPipeline","SemanticModel","Report"]'
+      unpublish_orphans:
+        description: 'Delete workspace items no longer present in the repo'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TARGET_ENV: ${{ github.ref_name }}
+
+jobs:
+
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install validation dependencies
+        run: pip install pyyaml
+
+      - name: Required directories exist
+        run: |
+          for d in fabric cicd fabric/insurance_WH.Warehouse; do
+            [ -d "$d" ] || { echo "::error::Missing directory: $d"; exit 1; }
+          done
+
+      - name: Required scripts exist
+        run: |
+          for f in cicd/deploy.py cicd/grant_and_get_endpoints.py \
+                   cicd/parameter.yml cicd/requirements.txt; do
+            [ -f "$f" ] || { echo "::error::Missing file: $f"; exit 1; }
+          done
+
+      - name: parameter.yml is valid for this environment
+        run: |
+          python - <<'PY'
+          import re, sys, yaml, pathlib
+
+          target = "${{ github.ref_name }}"
+          doc = yaml.safe_load(pathlib.Path("cicd/parameter.yml").read_text()) or {}
+          errors = []
+
+          for section in ("find_replace", "key_value_replace"):
+              for i, rule in enumerate(doc.get(section, []), start=1):
+                  where = f"{section}[{i}]"
+                  key = rule.get("find_value", rule.get("find_key", ""))
+
+                  if "<" in str(key) and ">" in str(key):
+                      errors.append(f"{where}: unfilled placeholder in {key!r}")
+
+                  replace = rule.get("replace_value") or {}
+                  if target not in replace and not any(
+                          k.lower() == "_all_" for k in replace):
+                      errors.append(f"{where}: no '{target}' key in replace_value")
+
+                  # A regex find_value must compile and expose exactly one group,
+                  # because group 1 is always the replacement target.
+                  if str(rule.get("is_regex", "")).lower() == "true":
+                      try:
+                          compiled = re.compile(rule["find_value"])
+                      except re.error as exc:
+                          errors.append(f"{where}: regex does not compile - {exc}")
+                          continue
+                      if compiled.groups != 1:
+                          errors.append(
+                              f"{where}: regex has {compiled.groups} capture groups, "
+                              f"expected exactly 1")
+
+          for e in errors:
+              print(f"::error::{e}")
+          sys.exit(1 if errors else 0)
+          PY
+
+      - name: Reports using byConnection have a matching rule
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys, yaml
+
+          doc = yaml.safe_load(pathlib.Path("cicd/parameter.yml").read_text()) or {}
+          rules = " ".join(str(r.get("find_value", ""))
+                           for r in doc.get("find_replace", []))
+          problems = []
+
+          for pbir in pathlib.Path("fabric").rglob("definition.pbir"):
+              content = json.loads(pbir.read_text())
+              ref = (content.get("datasetReference") or {})
+              if ref.get("byConnection") and "byConnection" not in rules:
+                  problems.append(f"{pbir} uses byConnection with no find_replace rule")
+
+          for p in problems:
+              print(f"::error::{p}")
+          sys.exit(1 if problems else 0)
+          PY
+
+  deploy_to_test:
+    name: Deploy to ${{ github.ref_name }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ github.ref_name }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deployment dependencies
+        run: pip install -r cicd/requirements.txt
+
+      - name: Resolve GIT_DIRECTORY
+        run: |
+          GITDIR="${{ vars.GIT_DIRECTORY }}"
+          GITDIR="${GITDIR:-fabric}"
+          echo "GITDIR=$GITDIR" >> "$GITHUB_ENV"
+          echo "Publishing from: $GITDIR"
+
+      - name: Stage parameter.yml
+        run: |
+          # fabric-cicd only reads parameter.yml from the root of the git
+          # directory. cicd/parameter.yml stays the source of truth; this copy
+          # lives on the runner only and is never committed.
+          cp cicd/parameter.yml "$GITDIR/parameter.yml"
+          echo "Staged to $GITDIR/parameter.yml"
+
+      - name: Azure login (Reader SP via OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch Deploy SP credentials from Key Vault
+        run: |
+          KV="${{ secrets.AZURE_KEYVAULT_NAME }}"
+          for pair in tenant-id:AZURE_TENANT_ID \
+                      client-id:AZURE_CLIENT_ID \
+                      client-secret:AZURE_CLIENT_SECRET; do
+            secret="deploy-sp-${pair%%:*}"
+            var="${pair##*:}"
+            value="$(az keyvault secret show --vault-name "$KV" \
+                       --name "$secret" --query value -o tsv)"
+            [ -n "$value" ] || { echo "::error::Empty secret: $secret"; exit 1; }
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done
+
+      - name: Publish items
+        env:
+          ITEMS_IN_SCOPE: >-
+            ${{ github.event.inputs.items_in_scope
+                || '["Warehouse","Lakehouse","Notebook","DataPipeline","SemanticModel","Report"]' }}
+          UNPUBLISH_ORPHANS: ${{ github.event.inputs.unpublish_orphans || 'false' }}
+        run: |
+          # Warehouse and Lakehouse are in scope so parameter.yml can resolve
+          # their id / sqlendpoint in the target workspace. fabric-cicd publishes
+          # stores before their consumers within a single run, so the semantic
+          # model and notebooks always resolve against items that already exist.
+          python cicd/deploy.py \
+            --target-env "$TARGET_ENV" \
+            --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
+            --git-directory "$GITDIR" \
+            --items-in-scope "$ITEMS_IN_SCOPE" \
+            --unpublish-orphans "$UNPUBLISH_ORPHANS"
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "## Deployment to ${{ github.ref_name }}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Workspace | ${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Git directory | \`$GITDIR\` |"
+            echo ""
+            echo "### Verify"
+            echo ""
+            echo "- Open \`sales_semantic_model\` in the test workspace and confirm the"
+            echo "  connection points at the **test** warehouse endpoint."
+            echo "- If a token such as \`\$items.Warehouse...\` appears verbatim in the"
+            echo "  deployed .tmdl, parameterisation did not resolve - check that"
+            echo "  Warehouse and Lakehouse are still in --items-in-scope."
+            echo ""
+            echo "### Manual steps (deliberately not automated)"
+            echo ""
+            echo "- Bind data-source credentials on \`sales_semantic_model\`"
+            echo "  (Fabric requires an interactive sign-in)."
+            echo "- Load data into Bronze, then run \`pl_silver\` to populate Gold."
+          } >> "$GITHUB_STEP_SUMMARY"

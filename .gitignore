@@ -1,0 +1,14 @@
+# validate_repo.py imports resolve_ids, so running it locally leaves bytecode.
+__pycache__/
+*.pyc
+
+# Local tool caches
+.ruff_cache/
+
+# Build output — the dacpac is produced by CI and uploaded as an artifact.
+dacpac-out/
+global.json
+
+# parameter.yml is copied into the git directory at deploy time, with the
+# generated find_replace rules appended. The source of truth is cicd/parameter.yml.
+fabric/parameter.yml
