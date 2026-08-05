@@ -4,13 +4,19 @@ name: Deploy to Fabric
 # deploy-warehouse.yml owns the warehouse schema (dacpac / SqlPackage) and
 # deploy-lakehouse.yml owns the lakehouse schema (nb_lakehouse_schema run).
 #
-# NOTE ON SCOPE: Warehouse and Lakehouse ARE included in --items-in-scope below,
-# even though this workflow does not own their schema. This is required, not
-# optional: parameter.yml resolves $items.Warehouse.insurance_WH.$sqlendpoint and
-# $items.Lakehouse.test_LH.$id, and fabric-cicd only resolves those variables for
-# item types inside the scope of the run. Without them, the semantic model and the
-# notebooks deploy silently still pointing at the dev workspace.
-# Including them publishes the item SHELL only -- no schema, no data.
+# NOTE ON SCOPE: Warehouse and Lakehouse are NOT in --items-in-scope. This
+# workflow does not create, update or delete a store item in any way.
+#
+# They used to be, for one reason only: fabric-cicd resolves a
+# $items.<Type>.<name>.$id variable only when <Type> is in scope for that run.
+# Existing in the workspace is not enough -- a run scoped to ["Warehouse"] still
+# fails with "Attribute value not found for Lakehouse 'test_LH'" while test_LH is
+# sitting right there. So two GUIDs were dragging two item types into scope.
+#
+# cicd/resolve_ids.py now reads those two ids straight from the Fabric API and
+# writes them into the staged parameter.yml before publishing, which breaks the
+# coupling. $workspace.$id still resolves through fabric-cicd -- it needs nothing
+# in scope.
 
 on:
   push:
@@ -23,7 +29,7 @@ on:
       items_in_scope:
         description: 'JSON array of item types to publish'
         required: false
-        default: '["Warehouse","Lakehouse","Notebook","DataPipeline","SemanticModel","Report"]'
+        default: '["Notebook","DataPipeline","SemanticModel","Report"]'
       unpublish_orphans:
         description: 'Delete workspace items no longer present in the repo'
         required: false
@@ -61,6 +67,7 @@ jobs:
       - name: Required scripts exist
         run: |
           for f in cicd/deploy.py cicd/grant_and_get_endpoints.py \
+                   cicd/resolve_ids.py \
                    cicd/parameter.yml cicd/requirements.txt; do
             [ -f "$f" ] || { echo "::error::Missing file: $f"; exit 1; }
           done
@@ -180,17 +187,27 @@ jobs:
             echo "$var=$value" >> "$GITHUB_ENV"
           done
 
+      # Turns $items.Warehouse.<name>.$id / $items.Lakehouse.<name>.$id in the
+      # staged copy into real GUIDs read from the target workspace, so neither
+      # type has to enter --items-in-scope below. Fails loudly if a store is
+      # missing rather than letting the literal token reach the deployed item.
+      - name: Resolve store ids into the staged parameter.yml
+        run: |
+          python cicd/resolve_ids.py \
+            --workspace-id "${{ vars[format('{0}_WORKSPACE_ID', github.ref_name)] }}" \
+            --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
+            --parameter-file "$GITDIR/parameter.yml"
+
       - name: Publish items
         env:
           ITEMS_IN_SCOPE: >-
             ${{ github.event.inputs.items_in_scope
-                || '["Warehouse","Lakehouse","Notebook","DataPipeline","SemanticModel","Report"]' }}
+                || '["Notebook","DataPipeline","SemanticModel","Report"]' }}
           UNPUBLISH_ORPHANS: ${{ github.event.inputs.unpublish_orphans || 'false' }}
         run: |
-          # Warehouse and Lakehouse are in scope so parameter.yml can resolve
-          # their id / sqlendpoint in the target workspace. fabric-cicd publishes
-          # stores before their consumers within a single run, so the semantic
-          # model and notebooks always resolve against items that already exist.
+          # No Warehouse, no Lakehouse: their ids are already literal GUIDs in
+          # the staged parameter.yml, so nothing here needs them in scope. This
+          # workflow never touches a store item.
           python cicd/deploy.py \
             --target-env "$TARGET_ENV" \
             --workspace-name "${{ vars[format('{0}_WORKSPACE_NAME', github.ref_name)] }}" \
@@ -212,11 +229,12 @@ jobs:
             echo ""
             echo "### Verify"
             echo ""
-            echo "- Open \`sales_semantic_model\` in the test workspace and confirm the"
-            echo "  connection points at the **test** warehouse endpoint."
-            echo "- If a token such as \`\$items.Warehouse...\` appears verbatim in the"
-            echo "  deployed .tmdl, parameterisation did not resolve - check that"
-            echo "  Warehouse and Lakehouse are still in --items-in-scope."
+            echo "- Open \`sales_semantic_model\` lineage: its warehouse must sit in"
+            echo "  **this** workspace, not dev."
+            echo "- Open \`nb_lakehouse_schema\` lineage: exactly **one** lakehouse."
+            echo "  Two means the known_lakehouses rule stopped matching."
+            echo "- A verbatim \`\$items.\` token in a deployed definition means"
+            echo "  resolve_ids.py did not rewrite it - check that step's log."
             echo ""
             echo "### Manual steps (deliberately not automated)"
             echo ""
