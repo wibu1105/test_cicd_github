@@ -406,10 +406,6 @@ RESOLVE_BY_NAME = (
 # "LakehouseWorkspaceId is not a valid GUID:".
 ATTACHED_GUID_RE = re.compile(
     r'"(default_(?:lakehouse|warehouse)(?:_workspace_id)?)"\s*:\s*"([0-9a-fA-F-]{36})"')
-# The name Fabric records beside the id. resolve_ids.py maps by this name, so a
-# header without it cannot be repointed at deploy time.
-STORE_NAME_RE = re.compile(
-    r'"default_(?:lakehouse|warehouse)_name"\s*:\s*"([^"]+)"')
 # Fabric repeats the store id a second time inside known_lakehouses /
 # known_warehouses, under a bare "id" key that ATTACHED_GUID_RE cannot see.
 # Within a notebook's metadata this key occurs nowhere else, so matching it
@@ -483,35 +479,27 @@ def check_notebooks(rep, entries, target_env):
                     f"was authored in, alongside the target one.",
                     file=str(f))
 
-        attached = ATTACHED_GUID_RE.findall(text)
+        attached = list(ATTACHED_GUID_RE.finditer(text))
         if attached:
-            # resolve_ids.py resolves stores by name against the Fabric API, so
-            # this gate cannot confirm the mapping without credentials it does
-            # not have. What it can confirm is that the header carries the name
-            # resolve_ids.py needs — a GUID with no name beside it is the case
-            # that would deploy still pointing at the source workspace.
-            has_name = STORE_NAME_RE.search(text)
-            for key, guid in attached:
+            # Exactly two things neutralise an environment-specific GUID here,
+            # and both are checked against this occurrence rather than the file
+            # as a whole. Nothing resolves "by name" at deploy time any more —
+            # that was resolve_ids.py, which no longer exists.
+            for m in attached:
+                key, guid = m.group(1), m.group(2)
+                g_start, g_end = m.span(2)
                 owner = logical_ids.get(guid)
                 if owner:
                     rep.ok(f"{name}: {key} is {owner}'s logicalId")
-                elif any(entry_matches(e, guid) for e in entries):
+                elif covered_at(entries, text, g_start, g_end):
                     rep.ok(f"{name}: {key} is rewritten by parameter.yml")
-                elif key.endswith("_workspace_id"):
-                    rep.ok(f"{name}: {key} -> $workspace.id at deploy time")
-                elif has_name:
-                    rep.ok(f"{name}: {key} resolves by name "
-                           f"'{has_name.group(1)}' at deploy time")
                 else:
                     rep.error(
                         "notebook",
-                        f"{name} sets {key} to {guid} with no "
-                        f"{key}_name beside it, so resolve_ids.py cannot map it "
-                        f"to a store. It is not an item's logicalId either, and no "
-                        f"find_replace rule in parameter.yml covers it for "
+                        f"{name} sets {key} to {guid}, which is neither an item's "
+                        f"logicalId nor covered by a find_replace rule for "
                         f"'{target_env}'. After deploy this notebook would still "
-                        f"attach to the workspace it was authored in. Re-attach the "
-                        f"store in Fabric so the header records its name.",
+                        f"attach to the workspace it was authored in.",
                         file=str(f))
             continue
 
