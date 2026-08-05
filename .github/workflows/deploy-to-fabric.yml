@@ -27,7 +27,7 @@ name: Deploy to Fabric
 
 on:
   push:
-    branches: [dev, test]
+    branches: [test, prod]
     paths-ignore:
       # A warehouse-only change is a schema change — deploy-warehouse.yml's job.
       # This workflow still publishes the item shell whenever it runs for any
@@ -40,8 +40,8 @@ on:
         required: true
         type: choice
         options:
-          - dev
           - test
+          - prod
         default: test
       ref:
         description: 'Tag or commit SHA to deploy (blank = current branch head)'
@@ -67,7 +67,7 @@ permissions:
   id-token: write
 
 concurrency:
-  # Keyed on the target workspace, not the branch: a dispatch of dev and a push
+  # Keyed on the target workspace, not the branch: a dispatch of prod and a push
   # to test publish into different workspaces and must not queue behind each
   # other. Never cancelled — a half-applied publish is worse than a slow one.
   group: deploy-to-fabric-${{ inputs.environment || github.ref_name }}
@@ -108,9 +108,9 @@ jobs:
           TARGET="${{ inputs.environment }}"
           TARGET="${TARGET:-${{ github.ref_name }}}"
           case "$TARGET" in
-            dev|test) ;;
+            test|prod) ;;
             *)
-              echo "::error::Unsupported environment '$TARGET'. Expected dev or test."
+              echo "::error::Unsupported environment '$TARGET'. Expected test or prod."
               echo "::error::Running from a tag? Use Run workflow and pick the environment."
               exit 1
               ;;
@@ -160,11 +160,14 @@ jobs:
           WS_ID="${{ vars[format('{0}_WORKSPACE_ID', needs.validate.outputs.target_env)] }}"
           WS_NAME="${{ vars[format('{0}_WORKSPACE_NAME', needs.validate.outputs.target_env)] }}"
 
-          # An unset repository variable expands to empty, and every step below
-          # would then quietly target nothing. Adding the dev environment is
-          # exactly when this is easy to forget.
-          [ -n "$WS_ID" ]   || { echo "::error::Repository variable ${TARGET_ENV}_WORKSPACE_ID is not set"; exit 1; }
-          [ -n "$WS_NAME" ] || { echo "::error::Repository variable ${TARGET_ENV}_WORKSPACE_NAME is not set"; exit 1; }
+          # An unset variable expands to empty, and every step below would then
+          # quietly target nothing. Adding an environment is exactly when this is
+          # easy to forget. The names are printed uppercase because that is how
+          # they read in the GitHub UI, even though vars[] matching is not
+          # case-sensitive and TARGET_ENV is the lowercase branch name.
+          ENV_UC="$(echo "$TARGET_ENV" | tr 'a-z' 'A-Z')"
+          [ -n "$WS_ID" ]   || { echo "::error::Variable ${ENV_UC}_WORKSPACE_ID is not set for environment '$TARGET_ENV'"; exit 1; }
+          [ -n "$WS_NAME" ] || { echo "::error::Variable ${ENV_UC}_WORKSPACE_NAME is not set for environment '$TARGET_ENV'"; exit 1; }
 
           {
             echo "GITDIR=$GITDIR"
@@ -259,7 +262,7 @@ jobs:
             echo "### Verify"
             echo ""
             echo "- Open \`sales_semantic_model\` lineage: its warehouse must sit in"
-            echo "  **this** workspace, not dev."
+            echo "  **this** workspace, not the one it was authored in."
             echo "- Open \`nb_lakehouse_schema\` lineage: exactly **one** lakehouse."
             echo "  Two means the known_lakehouses rule stopped matching."
             echo "- A verbatim \`\$items.\` token in a deployed definition means the"
