@@ -1,0 +1,186 @@
+table dim_product
+	lineageTag: ebec213a-ffd8-4571-992e-507052092ab6
+	sourceLineageTag: [Gold].[dim_product]
+
+	column product_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: ab0f41ca-6c44-4482-8066-cbb2f99b8484
+		sourceLineageTag: product_key
+		summarizeBy: none
+		sourceColumn: product_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_id
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: af3329c7-9dd2-454d-8c0c-46aaf5da54ee
+		sourceLineageTag: product_id
+		summarizeBy: none
+		sourceColumn: product_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column sku
+		dataType: string
+		sourceProviderType: varchar(50)
+		lineageTag: ec427362-0644-4554-8d47-e05b6e0804d4
+		sourceLineageTag: sku
+		summarizeBy: none
+		sourceColumn: sku
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_name
+		dataType: string
+		sourceProviderType: varchar(200)
+		lineageTag: 27b63941-503c-4641-b6fe-725a0fa3856f
+		sourceLineageTag: product_name
+		summarizeBy: none
+		sourceColumn: product_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column brand
+		dataType: string
+		sourceProviderType: varchar(100)
+		lineageTag: 63cd1ce8-805e-44f2-86ed-f77070386b23
+		sourceLineageTag: brand
+		summarizeBy: none
+		sourceColumn: brand
+
+		annotation SummarizationSetBy = Automatic
+
+	column brand_country
+		dataType: string
+		sourceProviderType: varchar(100)
+		lineageTag: 5dce5e41-65b9-48a0-a6e4-52d0ce34ef7e
+		sourceLineageTag: brand_country
+		summarizeBy: none
+		sourceColumn: brand_country
+
+		annotation SummarizationSetBy = Automatic
+
+	column category
+		dataType: string
+		sourceProviderType: varchar(100)
+		lineageTag: 58894e6e-70d0-4894-92e5-255a88933da2
+		sourceLineageTag: category
+		summarizeBy: none
+		sourceColumn: category
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_status
+		dataType: string
+		sourceProviderType: varchar(50)
+		lineageTag: 01159d30-f57f-4d50-a7a8-42e6b886e06a
+		sourceLineageTag: product_status
+		summarizeBy: none
+		sourceColumn: product_status
+
+		annotation SummarizationSetBy = Automatic
+
+	column unit_of_measure
+		dataType: string
+		sourceProviderType: varchar(20)
+		lineageTag: f298a063-928a-4f1f-a19b-005b52b29dc3
+		sourceLineageTag: unit_of_measure
+		summarizeBy: none
+		sourceColumn: unit_of_measure
+
+		annotation SummarizationSetBy = Automatic
+
+	column current_unit_price
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(10, 2)
+		lineageTag: 1d3e8568-faa2-41fd-969d-e70e2ea73a4b
+		sourceLineageTag: current_unit_price
+		summarizeBy: none
+		sourceColumn: current_unit_price
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column weight_kg
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(8, 3)
+		lineageTag: 59d7a149-6f61-41d4-95eb-cabb95e1dc56
+		sourceLineageTag: weight_kg
+		summarizeBy: none
+		sourceColumn: weight_kg
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column warranty_months
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 114c9dac-004e-482d-a07a-e8131ce6b8bb
+		sourceLineageTag: warranty_months
+		summarizeBy: none
+		sourceColumn: warranty_months
+
+		annotation SummarizationSetBy = Automatic
+
+	column introduced_date
+		dataType: dateTime
+		formatString: General Date
+		sourceProviderType: date
+		lineageTag: baae7440-ef85-4ea2-9b92-c5d4b4d6dbd3
+		sourceLineageTag: introduced_date
+		summarizeBy: none
+		sourceColumn: introduced_date
+
+		annotation SummarizationSetBy = Automatic
+
+	column effective_from
+		dataType: dateTime
+		formatString: General Date
+		sourceProviderType: date
+		lineageTag: 1643e006-1fb7-4d69-a4d9-142868d6d051
+		sourceLineageTag: effective_from
+		summarizeBy: none
+		sourceColumn: effective_from
+
+		annotation SummarizationSetBy = Automatic
+
+	column effective_to
+		dataType: dateTime
+		formatString: General Date
+		sourceProviderType: date
+		lineageTag: 2a8558f4-84c1-4c21-850e-e1dddd98c476
+		sourceLineageTag: effective_to
+		summarizeBy: none
+		sourceColumn: effective_to
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_current
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 5dec4ed4-4651-4595-95a1-ce4088c36c25
+		sourceLineageTag: is_current
+		summarizeBy: none
+		sourceColumn: is_current
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_product = entity
+		mode: directLake
+		source
+			entityName: dim_product
+			schemaName: Gold
+			expressionSource: DatabaseQuery
+
+	annotation PBI_ResultType = Table
+

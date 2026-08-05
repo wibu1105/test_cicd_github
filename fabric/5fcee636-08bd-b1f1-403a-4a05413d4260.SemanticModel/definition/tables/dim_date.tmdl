@@ -1,0 +1,207 @@
+table dim_date
+	lineageTag: 6e4eee7e-688e-4f11-9e5c-054659ec826d
+	sourceLineageTag: [Gold].[dim_date]
+
+	column date_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: f7e03f18-dd58-4b7e-bc10-6da5340b1a58
+		sourceLineageTag: date_key
+		summarizeBy: none
+		sourceColumn: date_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column full_date
+		dataType: dateTime
+		formatString: General Date
+		sourceProviderType: date
+		lineageTag: 88b9f1cc-2d77-4a93-b964-0dd2b1541a2d
+		sourceLineageTag: full_date
+		summarizeBy: none
+		sourceColumn: full_date
+
+		annotation SummarizationSetBy = Automatic
+
+	column day_of_week
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: e3e1cab8-a0e5-49f4-8532-70180348fa02
+		sourceLineageTag: day_of_week
+		summarizeBy: sum
+		sourceColumn: day_of_week
+
+		annotation SummarizationSetBy = Automatic
+
+	column day_name
+		dataType: string
+		sourceProviderType: varchar(10)
+		lineageTag: 545037ee-350f-426c-a87a-74082bcaf0ab
+		sourceLineageTag: day_name
+		summarizeBy: none
+		sourceColumn: day_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column day_of_month
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 50f3e0a2-5e37-4626-aa8e-a5e4312c61d5
+		sourceLineageTag: day_of_month
+		summarizeBy: sum
+		sourceColumn: day_of_month
+
+		annotation SummarizationSetBy = Automatic
+
+	column day_of_year
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 3513bcf4-34c2-4d7f-9093-6b3041f4ea3e
+		sourceLineageTag: day_of_year
+		summarizeBy: sum
+		sourceColumn: day_of_year
+
+		annotation SummarizationSetBy = Automatic
+
+	column week_of_year
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 5d69cb8c-8f62-4089-903f-41cd600b73f7
+		sourceLineageTag: week_of_year
+		summarizeBy: sum
+		sourceColumn: week_of_year
+
+		annotation SummarizationSetBy = Automatic
+
+	column month_number
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: d9c46aa9-ccc9-4436-8f0c-bd1d8e86cac2
+		sourceLineageTag: month_number
+		summarizeBy: sum
+		sourceColumn: month_number
+
+		annotation SummarizationSetBy = Automatic
+
+	column month_name
+		dataType: string
+		sourceProviderType: varchar(10)
+		lineageTag: 8387285c-1615-425a-a719-ffe0fe1e5a68
+		sourceLineageTag: month_name
+		summarizeBy: none
+		sourceColumn: month_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column month_short
+		dataType: string
+		sourceProviderType: char
+		lineageTag: 442d004f-f616-4d91-ae93-b655ebcebc57
+		sourceLineageTag: month_short
+		summarizeBy: none
+		sourceColumn: month_short
+
+		annotation SummarizationSetBy = Automatic
+
+	column quarter_number
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 3d83b9bf-48c4-4816-a637-bc428f5acd09
+		sourceLineageTag: quarter_number
+		summarizeBy: sum
+		sourceColumn: quarter_number
+
+		annotation SummarizationSetBy = Automatic
+
+	column quarter_name
+		dataType: string
+		sourceProviderType: char
+		lineageTag: a67ffbee-9446-47ff-99ed-252e47aa0c26
+		sourceLineageTag: quarter_name
+		summarizeBy: none
+		sourceColumn: quarter_name
+
+		annotation SummarizationSetBy = Automatic
+
+	column year_number
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 834bd3d2-3325-45df-a187-abbfb725303e
+		sourceLineageTag: year_number
+		summarizeBy: sum
+		sourceColumn: year_number
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_weekend
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 2aad0d01-725b-43b6-a383-15370740b6ba
+		sourceLineageTag: is_weekend
+		summarizeBy: sum
+		sourceColumn: is_weekend
+
+		annotation SummarizationSetBy = Automatic
+
+	column is_holiday
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 5d09dbfd-2333-46a7-92d6-af131233060e
+		sourceLineageTag: is_holiday
+		summarizeBy: sum
+		sourceColumn: is_holiday
+
+		annotation SummarizationSetBy = Automatic
+
+	column fiscal_year
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 8f02c18f-3e01-477b-a376-7f022d1b8222
+		sourceLineageTag: fiscal_year
+		summarizeBy: sum
+		sourceColumn: fiscal_year
+
+		annotation SummarizationSetBy = Automatic
+
+	column fiscal_quarter
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 7fe953aa-2a1c-42dd-a481-6489c3e1cbc0
+		sourceLineageTag: fiscal_quarter
+		summarizeBy: sum
+		sourceColumn: fiscal_quarter
+
+		annotation SummarizationSetBy = Automatic
+
+	column fiscal_month
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 1a020c11-4bbc-47c6-92eb-da3fcfd40328
+		sourceLineageTag: fiscal_month
+		summarizeBy: sum
+		sourceColumn: fiscal_month
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_date = entity
+		mode: directLake
+		source
+			entityName: dim_date
+			schemaName: Gold
+			expressionSource: DatabaseQuery
+
+	annotation PBI_ResultType = Table
+

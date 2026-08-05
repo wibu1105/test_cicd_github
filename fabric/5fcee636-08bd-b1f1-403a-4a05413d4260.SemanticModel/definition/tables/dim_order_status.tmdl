@@ -1,0 +1,34 @@
+table dim_order_status
+	lineageTag: 157f2f65-f6b5-401a-8983-8bddad007c69
+	sourceLineageTag: [Gold].[dim_order_status]
+
+	column order_status_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 5a0c3bdf-00cd-434b-b1dd-ea21c936fe39
+		sourceLineageTag: order_status_key
+		summarizeBy: none
+		sourceColumn: order_status_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column order_status
+		dataType: string
+		sourceProviderType: varchar(20)
+		lineageTag: 72a76102-2d22-47a9-850b-dfe3da57282a
+		sourceLineageTag: order_status
+		summarizeBy: none
+		sourceColumn: order_status
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_order_status = entity
+		mode: directLake
+		source
+			entityName: dim_order_status
+			schemaName: Gold
+			expressionSource: DatabaseQuery
+
+	annotation PBI_ResultType = Table
+

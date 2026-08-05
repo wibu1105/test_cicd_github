@@ -1,0 +1,225 @@
+table fact_sales
+	lineageTag: 07992293-c3a4-4d88-bae5-d8c56cf34378
+	sourceLineageTag: [Gold].[fact_sales]
+
+	column sales_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 1753daec-ba10-41b4-9cdb-a7809befd6a1
+		sourceLineageTag: sales_key
+		summarizeBy: sum
+		sourceColumn: sales_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column order_line_id
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: b3455dda-f2e1-4182-a214-d42bb3404322
+		sourceLineageTag: order_line_id
+		summarizeBy: sum
+		sourceColumn: order_line_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column order_id
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 1fa4f0f0-0242-44b3-ba75-b82220e6814f
+		sourceLineageTag: order_id
+		summarizeBy: sum
+		sourceColumn: order_id
+
+		annotation SummarizationSetBy = Automatic
+
+	column order_date_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 1a706ea2-e54f-43e9-b8b7-09e789413156
+		sourceLineageTag: order_date_key
+		summarizeBy: sum
+		sourceColumn: order_date_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column ship_date_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 23db7290-0ed9-4cd4-8df9-a7634ae13cba
+		sourceLineageTag: ship_date_key
+		summarizeBy: none
+		sourceColumn: ship_date_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column customer_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: f79b00fc-29c8-4cd0-b622-d4423735550f
+		sourceLineageTag: customer_key
+		summarizeBy: none
+		sourceColumn: customer_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 6f5145ce-3163-4519-88ee-92f20ead2f3e
+		sourceLineageTag: product_key
+		summarizeBy: none
+		sourceColumn: product_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column geography_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: dd9e2d4d-e1c3-419b-952d-dea73e10ccd0
+		sourceLineageTag: geography_key
+		summarizeBy: none
+		sourceColumn: geography_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column order_status_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 0f2c2958-ec46-4790-a352-adf12bf9d913
+		sourceLineageTag: order_status_key
+		summarizeBy: none
+		sourceColumn: order_status_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column quantity
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 32317c1e-3807-408b-82cf-030f0279f29d
+		sourceLineageTag: quantity
+		summarizeBy: sum
+		sourceColumn: quantity
+
+		annotation SummarizationSetBy = Automatic
+
+	column unit_price
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(10, 2)
+		lineageTag: f2a5c451-b78a-4e37-8e32-eea2d965a14b
+		sourceLineageTag: unit_price
+		summarizeBy: sum
+		sourceColumn: unit_price
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column discount_pct
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(5, 2)
+		lineageTag: 58ea0a6c-87c8-4497-9a87-f82a06569b2e
+		sourceLineageTag: discount_pct
+		summarizeBy: sum
+		sourceColumn: discount_pct
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column discount_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(10, 2)
+		lineageTag: 16ec42ae-9818-4452-9d74-18e84b182932
+		sourceLineageTag: discount_amount
+		summarizeBy: sum
+		sourceColumn: discount_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column gross_sales_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(10, 2)
+		lineageTag: f29f2d0c-44bf-4553-a1cb-8e40408b1bb8
+		sourceLineageTag: gross_sales_amount
+		summarizeBy: sum
+		sourceColumn: gross_sales_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column net_sales_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(10, 2)
+		lineageTag: a200ceb1-85d8-471d-95b3-af8c4abeee4e
+		sourceLineageTag: net_sales_amount
+		summarizeBy: sum
+		sourceColumn: net_sales_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column cost_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(10, 2)
+		lineageTag: a7ee1a0d-d989-4b6c-a4bd-c9850365b3d1
+		sourceLineageTag: cost_amount
+		summarizeBy: sum
+		sourceColumn: cost_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column gross_margin_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(10, 2)
+		lineageTag: b0ba28f0-b4ec-4500-8e08-ba5d72df9bb0
+		sourceLineageTag: gross_margin_amount
+		summarizeBy: sum
+		sourceColumn: gross_margin_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column days_to_ship
+		dataType: int64
+		formatString: 0
+		sourceProviderType: smallint
+		lineageTag: 0bc458e1-1dbb-4f5b-8c84-5d651d2cfa2e
+		sourceLineageTag: days_to_ship
+		summarizeBy: sum
+		sourceColumn: days_to_ship
+
+		annotation SummarizationSetBy = Automatic
+
+	partition fact_sales = entity
+		mode: directLake
+		source
+			entityName: fact_sales
+			schemaName: Gold
+			expressionSource: DatabaseQuery
+
+	annotation PBI_ResultType = Table
+

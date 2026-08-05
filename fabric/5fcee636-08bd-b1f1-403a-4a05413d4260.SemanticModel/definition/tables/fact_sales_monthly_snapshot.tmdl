@@ -1,0 +1,177 @@
+table fact_sales_monthly_snapshot
+	lineageTag: 25ca8721-7213-4a67-b913-f099061d10de
+	sourceLineageTag: [Gold].[fact_sales_monthly_snapshot]
+
+	column snapshot_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: a417e1a5-39ff-40b1-a4a6-6ae997fc118f
+		sourceLineageTag: snapshot_key
+		summarizeBy: sum
+		sourceColumn: snapshot_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column snapshot_date_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: cd9f793e-fc56-4f8a-808e-12ad5844c6df
+		sourceLineageTag: snapshot_date_key
+		summarizeBy: sum
+		sourceColumn: snapshot_date_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column customer_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 91be496d-473c-424a-865c-1806b1b3d3e6
+		sourceLineageTag: customer_key
+		summarizeBy: sum
+		sourceColumn: customer_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column product_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: bd992531-4be0-4dc3-a341-3fbcb8ca6e32
+		sourceLineageTag: product_key
+		summarizeBy: sum
+		sourceColumn: product_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column geography_key
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 44d01711-7360-413d-a958-a4e40de543f7
+		sourceLineageTag: geography_key
+		summarizeBy: sum
+		sourceColumn: geography_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column order_count
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: 486e523f-d198-45fe-b5c1-8a6764056012
+		sourceLineageTag: order_count
+		summarizeBy: sum
+		sourceColumn: order_count
+
+		annotation SummarizationSetBy = Automatic
+
+	column quantity_sold
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: f13633e2-427e-49f8-866e-8c52b05c4a4a
+		sourceLineageTag: quantity_sold
+		summarizeBy: sum
+		sourceColumn: quantity_sold
+
+		annotation SummarizationSetBy = Automatic
+
+	column gross_sales_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(12, 2)
+		lineageTag: 30d08c22-7bae-416c-8703-f1bd6db4909a
+		sourceLineageTag: gross_sales_amount
+		summarizeBy: sum
+		sourceColumn: gross_sales_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column discount_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(12, 2)
+		lineageTag: cfbc7e0f-93da-4d32-95d9-fe4b79525d15
+		sourceLineageTag: discount_amount
+		summarizeBy: sum
+		sourceColumn: discount_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column net_sales_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(12, 2)
+		lineageTag: 8b970baa-53cf-430f-b2ec-0f5ccaa8e84f
+		sourceLineageTag: net_sales_amount
+		summarizeBy: sum
+		sourceColumn: net_sales_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column gross_margin_amount
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(12, 2)
+		lineageTag: 7d62b910-843f-481c-9857-87da0484932c
+		sourceLineageTag: gross_margin_amount
+		summarizeBy: sum
+		sourceColumn: gross_margin_amount
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	column ytd_order_count
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: cd9a277a-69a4-4d9e-b314-18926ee14368
+		sourceLineageTag: ytd_order_count
+		summarizeBy: sum
+		sourceColumn: ytd_order_count
+
+		annotation SummarizationSetBy = Automatic
+
+	column ytd_quantity_sold
+		dataType: int64
+		formatString: 0
+		sourceProviderType: int
+		lineageTag: a8a72005-9b59-4d61-a3b1-0a547a574427
+		sourceLineageTag: ytd_quantity_sold
+		summarizeBy: sum
+		sourceColumn: ytd_quantity_sold
+
+		annotation SummarizationSetBy = Automatic
+
+	column ytd_net_sales
+		dataType: decimal
+		formatString: \$#,0.###############;(\$#,0.###############);\$#,0.###############
+		sourceProviderType: decimal(12, 2)
+		lineageTag: 7a23a1f5-69ff-41eb-b322-18e2c96649e2
+		sourceLineageTag: ytd_net_sales
+		summarizeBy: sum
+		sourceColumn: ytd_net_sales
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"currencyCulture":"en-US"}
+
+	partition fact_sales_monthly_snapshot = entity
+		mode: directLake
+		source
+			entityName: fact_sales_monthly_snapshot
+			schemaName: Gold
+			expressionSource: DatabaseQuery
+
+	annotation PBI_ResultType = Table
+
