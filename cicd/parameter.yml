@@ -4,20 +4,16 @@
 # OneLake path is resolved at deploy time from dynamic variables. No GUID is
 # written down here.
 #
-# REQUIREMENT: the workflow that publishes these items must have Warehouse and
-# Lakehouse in --items-in-scope. A $items.<Type>.<name>.$<attr> variable resolves
-# only when that type is in scope for the run — existing in the workspace is not
-# enough, and a run without them fails with "Attribute value not found for
-# Lakehouse 'test_LH'". deploy-to-fabric.yml keeps both in scope for exactly this
-# reason; being in scope publishes the item shell and nothing else. The schema
-# inside each store still comes from deploy-warehouse.yml (dacpac) and the
-# nb_lakehouse_schema run. $workspace.$id needs nothing in scope.
+# REQUIREMENT: the publishing workflow must keep Warehouse and Lakehouse in
+# --items-in-scope. $items.<Type>.<name>.$<attr> resolves only for types in scope
+# — being in the workspace is not enough, and a run without them fails with
+# "Attribute value not found for Lakehouse 'test_LH'". ($workspace.$id needs
+# nothing in scope.)
 #
-# EVERY RULE NEEDS A KEY PER ENVIRONMENT — `test` and `prod` today. A missing key
-# fails cicd/validate_repo.py before anything is published. The two values are
-# identical on purpose: these are dynamic variables, so the same string resolves
-# against whichever workspace the run targets. Adding an environment means
-# copying each line under the new name, never inventing a GUID for it.
+# EVERY RULE NEEDS A KEY PER ENVIRONMENT — `test` and `prod` today; a missing one
+# fails cicd/validate_repo.py. Both values are identical on purpose: dynamic
+# variables resolve against whichever workspace the run targets, so adding an
+# environment means copying the line, never inventing a GUID.
 #
 # Item type and item name are CASE SENSITIVE and must match the repo folder names.
 #
