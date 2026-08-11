@@ -24,18 +24,6 @@ on:
           - test
           - prod
         default: test
-      # GitHub cannot read git tags into a dropdown — a choice list is static, so
-      # every new release tag has to be added here by hand. HEAD stays first and
-      # default: it means "the ref picked in Use workflow from", so this field is
-      # never stale and never has to be edited just to deploy a branch.
-      tag:
-        description: 'Release tag to deploy'
-        required: true
-        type: choice
-        options:
-          - HEAD
-          # - releases/1.0.0
-        default: HEAD
       items_in_scope:
         description: 'JSON array of item types to publish'
         required: false
@@ -54,11 +42,6 @@ permissions:
   contents: read
   id-token: write
 
-env:
-  # What actually gets checked out. A push has no inputs at all, and HEAD means
-  # the ref the run was started on — both fall back to github.ref.
-  DEPLOY_REF: ${{ (!inputs.tag || inputs.tag == 'HEAD') && github.ref || inputs.tag }}
-
 concurrency:
   # Keyed on the workspace, not the branch — test and prod must not queue behind
   # each other. Never cancelled: a half-applied publish is worse than a slow one.
@@ -75,9 +58,10 @@ jobs:
       target_env: ${{ steps.target.outputs.env }}
 
     steps:
+      # No ref: given — checkout defaults to github.ref, which for a dispatch is
+      # exactly whatever "Use workflow from" was set to. That picker already
+      # lists every branch AND tag, so a release tag needs no dropdown of its own.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.DEPLOY_REF }}
 
       - uses: actions/setup-python@v5
         with:
@@ -86,9 +70,9 @@ jobs:
       - name: Install validation dependencies
         run: pip install pyyaml
 
-      # A push carries no inputs, so the branch name is the environment. The
-      # dropdown is what makes deploying a tag possible: github.ref_name would be
-      # "v1.2.0" there, which is neither a workspace nor a parameter.yml key.
+      # A push carries no inputs, so the branch name is the environment. A
+      # dispatch off a tag always has the dropdown, since github.ref_name would
+      # be "v1.2.0" there — neither a workspace nor a parameter.yml key.
       - name: Resolve target environment
         id: target
         run: |
@@ -104,7 +88,7 @@ jobs:
           esac
           echo "env=$TARGET" >> "$GITHUB_OUTPUT"
           echo "Target environment : $TARGET"
-          echo "Deploying ref      : $DEPLOY_REF"
+          echo "Deploying ref      : ${{ github.ref }}"
 
       - name: Validate repository
         run: python cicd/validate_repo.py --target-env "${{ steps.target.outputs.env }}"
@@ -127,8 +111,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.DEPLOY_REF }}
 
       - uses: actions/setup-python@v5
         with:
@@ -230,7 +212,7 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| Workspace | ${WORKSPACE_NAME:-unresolved} |"
-            echo "| Ref | \`${DEPLOY_REF}\` |"
+            echo "| Ref | \`${{ github.ref }}\` |"
             echo "| Commit | \`${{ github.sha }}\` |"
             echo "| Git directory | \`${GITDIR:-unresolved}\` |"
             echo "| Items in scope | \`${ITEMS_IN_SCOPE}\` |"
