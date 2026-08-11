@@ -61,7 +61,7 @@ jobs:
       # No ref: given — checkout defaults to github.ref, which for a dispatch is
       # exactly whatever "Use workflow from" was set to. That picker already
       # lists every branch AND tag, so a release tag needs no dropdown of its own.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
@@ -110,7 +110,7 @@ jobs:
       UNPUBLISH_ORPHANS: ${{ inputs.unpublish_orphans || 'false' }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: actions/setup-python@v5
         with:
