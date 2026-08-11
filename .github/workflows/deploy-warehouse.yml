@@ -28,12 +28,15 @@ on:
           - test
           - prod
         default: test
-      # Blank rather than a branch name on purpose — see deploy-to-fabric.yml.
+      # Static list — GitHub cannot read git tags. See deploy-to-fabric.yml.
       tag:
-        description: 'Tag, branch or SHA to deploy (blank = the ref picked above)'
-        required: false
-        type: string
-        default: ''
+        description: 'Release tag to deploy'
+        required: true
+        type: choice
+        options:
+          - HEAD
+          # - releases/1.0.0
+        default: HEAD
 
 permissions:
   contents: read
@@ -45,6 +48,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # What actually gets checked out — see deploy-to-fabric.yml.
+  DEPLOY_REF: ${{ (!inputs.tag || inputs.tag == 'HEAD') && github.ref || inputs.tag }}
   WAREHOUSE: insurance_WH
   POPULATE_PROCS: >-
     Bronze.usp_populate_new_columns
@@ -61,7 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ env.DEPLOY_REF }}
 
       - uses: actions/setup-python@v7
         with:
@@ -87,7 +92,7 @@ jobs:
           esac
           echo "env=$TARGET" >> "$GITHUB_OUTPUT"
           echo "Target environment : $TARGET"
-          echo "Deploying ref      : ${{ inputs.tag || github.ref }}"
+          echo "Deploying ref      : $DEPLOY_REF"
 
       - name: Validate repository
         run: python cicd/validate_repo.py --target-env "${{ steps.target.outputs.env }}"
@@ -105,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ env.DEPLOY_REF }}
 
       - uses: actions/setup-python@v7
         with:
