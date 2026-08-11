@@ -55,9 +55,9 @@ jobs:
 
       - name: Validate repository
         run: |
-          # Target environment is the branch being merged into, so the same
-          # workflow validates prod pull requests correctly once that branch
-          # exists.
+          # Target environment is the branch being merged into, so one workflow
+          # validates test and prod pull requests against their own key in
+          # parameter.yml.
           python cicd/validate_repo.py --target-env "${{ github.base_ref }}"
 
       - name: Lint deployment scripts

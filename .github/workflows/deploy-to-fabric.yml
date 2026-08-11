@@ -9,8 +9,11 @@ name: Deploy to Fabric
 # needs both ids. Being in scope publishes the shell, nothing more.
 
 on:
+  # test only. prod is deliberately dispatch-only: a merge into prod must not
+  # deploy on its own, because a push carries no way to say which release it is.
+  # Production goes out by picking a tag in Run workflow.
   push:
-    branches: [test, prod]
+    branches: [test]
     paths-ignore:
       # Warehouse-only change = schema change = deploy-warehouse.yml's job.
       - 'fabric/*.Warehouse/**'
