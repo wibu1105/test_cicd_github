@@ -1,6 +1,8 @@
 # .github/workflows/deploy-warehouse.yml
 #
-# The warehouse SCHEMA only: dacpac build, SqlPackage publish, backfill procs.
+# The warehouse SCHEMA only: dacpac build, SqlPackage publish. It changes shape,
+# never data — backfill procedures are run from run-fabric-item.yml.
+#
 # Separate from deploy-to-fabric.yml because it is the one pipeline needing
 # .NET, SqlPackage and msodbcsql18.
 #
@@ -11,14 +13,8 @@
 
 name: Deploy warehouse
 
+# Dispatch-only, test included — see deploy-to-fabric.yml.
 on:
-  # test only — prod is dispatch-only. See deploy-to-fabric.yml.
-  push:
-    branches: [test]
-    paths:
-      # Not '**/*.Warehouse/**': GitHub's '**' is a character wildcard, so it
-      # would demand the item sit two levels deep. Items live directly in fabric/.
-      - 'fabric/*.Warehouse/**'
   workflow_dispatch:
     inputs:
       environment:
@@ -35,15 +31,12 @@ permissions:
   id-token: write
 
 concurrency:
-  # Keyed on the target workspace rather than the branch — see deploy-to-fabric.yml.
-  group: deploy-warehouse-${{ inputs.environment || github.ref_name }}
+  # See deploy-to-fabric.yml.
+  group: deploy-warehouse-${{ inputs.environment }}
   cancel-in-progress: false
 
 env:
   WAREHOUSE: insurance_WH
-  POPULATE_PROCS: >-
-    Bronze.usp_populate_new_columns
-    Gold.usp_populate_new_columns
 
 jobs:
   validate:
@@ -62,24 +55,12 @@ jobs:
 
       - run: pip install pyyaml
 
-      # A push carries no inputs, so the branch name is the environment. A
-      # dispatch off a tag always has the dropdown, since github.ref_name would
-      # be "v1.2.0" there.
+      # inputs.environment is a required choice input — always test or prod.
       - name: Resolve target environment
         id: target
         run: |
-          TARGET="${{ inputs.environment }}"
-          TARGET="${TARGET:-${{ github.ref_name }}}"
-          case "$TARGET" in
-            test|prod) ;;
-            *)
-              echo "::error::Unsupported environment '$TARGET'. Expected test or prod."
-              echo "::error::Running from a tag? Use Run workflow and pick the environment."
-              exit 1
-              ;;
-          esac
-          echo "env=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "Target environment : $TARGET"
+          echo "env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          echo "Target environment : ${{ inputs.environment }}"
           echo "Deploying ref      : ${{ github.ref }}"
 
       - name: Validate repository
@@ -194,15 +175,17 @@ jobs:
             /p:BlockOnPossibleDataLoss=true \
             /p:DropObjectsNotInSource=false
 
-      # Backfill runs as plain SQL against the endpoint just published to.
-      - name: Populate new columns
+      # Backfill is NOT run here. Adding a column and populating it are separate
+      # decisions: the schema change is safe to repeat, the data change is not
+      # always. run-fabric-item.yml executes the procedures.
+      - name: Next steps
         run: |
-          for proc in $POPULATE_PROCS; do
-            echo "::group::$proc"
-            python cicd/run_sql.py \
-              --server "$INSURANCE_WH_ENDPOINT" \
-              --database "$WAREHOUSE" \
-              --procedure "$proc" \
-              --skip-if-missing
-            echo "::endgroup::"
-          done
+          {
+            echo "### Schema published to \`${TARGET_ENV}\`"
+            echo ""
+            echo "Backfill is not automatic. If this release added a column, run"
+            echo "**Run Fabric item** with type \`StoredProcedure\`:"
+            echo ""
+            echo "- \`Bronze.usp_populate_new_columns\`"
+            echo "- \`Gold.usp_populate_new_columns\` (after Bronze — Gold reads from it)"
+          } >> "$GITHUB_STEP_SUMMARY"
