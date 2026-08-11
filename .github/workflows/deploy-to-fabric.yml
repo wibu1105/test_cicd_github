@@ -31,11 +31,6 @@ on:
         description: 'JSON array of item types to publish'
         required: false
         default: '["Lakehouse","Warehouse","Notebook","DataPipeline","SemanticModel","Report"]'
-      run_job:
-        description: 'Item to run after deploy, as Name:Type (e.g. pl_ingest:DataPipeline)'
-        required: false
-        type: string
-        default: ''
       unpublish_orphans:
         description: 'DANGER: deletes workspace items absent from the repo, stores included'
         required: false
@@ -106,7 +101,6 @@ jobs:
     env:
       TARGET_ENV: ${{ needs.validate.outputs.target_env }}
       SCHEMA_NOTEBOOK: nb_lakehouse_schema
-      RUN_JOB: ${{ inputs.run_job }}
       ITEMS_IN_SCOPE: >-
         ${{ inputs.items_in_scope
             || '["Lakehouse","Warehouse","Notebook","DataPipeline","SemanticModel","Report"]' }}
@@ -197,15 +191,6 @@ jobs:
             --wait \
             --timeout-minutes 20
 
-      - name: Run post-deploy job
-        if: ${{ inputs.run_job != '' }}
-        run: |
-          python cicd/trigger_job.py \
-            --workspace-id "$WORKSPACE_ID" \
-            --item-name "${RUN_JOB%%:*}" \
-            --item-type "${RUN_JOB##*:}" \
-            --wait
-
       - name: Deployment summary
         if: always()
         run: |
@@ -219,7 +204,6 @@ jobs:
             echo "| Commit | \`${{ github.sha }}\` |"
             echo "| Git directory | \`${GITDIR:-unresolved}\` |"
             echo "| Items in scope | \`${ITEMS_IN_SCOPE}\` |"
-            echo "| Post-deploy job | \`${RUN_JOB:-none}\` |"
             echo ""
             echo "### Verify"
             echo ""
