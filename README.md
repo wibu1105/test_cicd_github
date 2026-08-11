@@ -11,17 +11,19 @@ dev  ──PR──►  test  ──PR──►  prod
 
 | Branch | Role | Deploys? |
 |---|---|---|
-| `dev` | where work happens | no — pushing here triggers nothing |
-| `test` | test environment | yes, automatically on merge |
-| `prod` | default branch, production record | **no** — production goes out by dispatch only |
+| `dev` | where work happens | no |
+| `test` | test environment | no |
+| `prod` | default branch, production record | no |
 
-`prod` deliberately has no push trigger. A push carries no inputs, so it has no
-way to say *which release* is going out; production is deployed by picking a tag
-in Run workflow instead.
+**Neither `test` nor `prod` deploys on merge.** Both workflows are dispatch-only
+— a push carries no way to say *which release* is going out, so nothing ships
+without someone picking a tag and a workspace in Run workflow. Merging a PR
+only moves code onto a branch; it never triggers Fabric.
 
-That leaves `prod` with two jobs: it is the branch the dispatch form reads its
-input definitions from, and it records what has been released. Merge into it
-when the workflow files themselves change — not once per release.
+`prod` being the default branch matters for one reason unrelated to deploying:
+the dispatch form's inputs are read from whatever is on the default branch. If
+an input changes, `prod` needs the merge before the new form shows up — not per
+release, only when the workflow files themselves change.
 
 ## Workflows
 
@@ -46,7 +48,7 @@ and then reads from the wrong workspace.
 
 Publishes **every Fabric item**, then applies the lakehouse schema.
 
-Triggers: push to `test` (except warehouse-only changes), or Run workflow.
+Trigger: Run workflow only.
 
 ```
 validate  →  resolve workspace  →  Azure login + Key Vault
@@ -66,7 +68,7 @@ The warehouse **schema** only: dacpac build, SqlPackage publish, backfill procs.
 Separate because it is the one pipeline needing .NET, SqlPackage and
 msodbcsql18.
 
-Triggers: push to `test` touching `fabric/*.Warehouse/**`, or Run workflow.
+Trigger: Run workflow only.
 
 ```
 validate  →  resolve SQL endpoint  →  build dacpac
@@ -85,31 +87,23 @@ that do exist.
 
 ## Deploying
 
-### To `test`
+Same flow for `test` and `prod` — the only difference is which workspace you
+pick and, for `prod`, an approval in the middle.
 
-Merge a pull request into `test`. Path filters decide which workflow runs:
-
-| Commit touches | Deploy to Fabric | Deploy warehouse |
-|---|---|---|
-| only `fabric/*.Warehouse/**` | — | ✅ |
-| only notebooks / pipelines / lakehouse | ✅ | — |
-| both | ✅ | ✅ |
-| only `cicd/**` or `.github/**` | ✅ | — |
-
-### To `prod`
-
-1. Tag the commit you verified on `test`:
+1. Push (or merge into `dev`, or tag any commit you want, including `test`'s
+   current HEAD):
    ```bash
    git tag -a releases/1.3.0 -m "releases/1.3.0"
    git push origin releases/1.3.0
    ```
-2. **Actions** → **Deploy to Fabric** → **Run workflow**
+2. **Actions** → **Deploy to Fabric** (or **Deploy warehouse**) → **Run workflow**
 3. **Use workflow from** → **Tags** tab → pick the tag
-4. **Choose target workspace** → `prod`
-5. Approve when the `prod` environment gate pauses the run
+4. **Choose target workspace** → `test` or `prod`
+5. Run workflow. A `prod` run pauses for approval at the environment gate;
+   `test` does not.
 
-Path filters do **not** apply to a dispatch — it runs in full regardless of what
-the tag changed. So you decide which workflow to run:
+A dispatch always runs in full — there is no path filter deciding which
+workflow applies, so you decide which to run based on what the tag changed:
 
 | Tag contains | Run |
 |---|---|
@@ -118,6 +112,10 @@ the tag changed. So you decide which workflow to run:
 | both | both, **Deploy to Fabric first** |
 
 Unsure? Run both. Each is idempotent.
+
+The usual order is deploy to `test`, look at the result in Fabric, then run the
+same tag again against `prod` — but nothing enforces that order. Nothing stops
+tagging straight to `prod` either; the approval gate is the only checkpoint.
 
 > **A dispatch runs the workflow file as it exists in the selected ref**, not the
 > latest one. The *form* comes from the default branch, the *execution* comes

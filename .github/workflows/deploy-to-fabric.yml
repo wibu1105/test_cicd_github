@@ -7,16 +7,12 @@ name: Deploy to Fabric
 # Warehouse and Lakehouse stay in --items-in-scope because fabric-cicd resolves
 # $items.<Type>.<name>.$id only for types in scope for that run — parameter.yml
 # needs both ids. Being in scope publishes the shell, nothing more.
+#
+# Dispatch-only, test included: a push carries no way to say which release is
+# going out, so nothing deploys without someone picking a tag and a workspace
+# in Run workflow.
 
 on:
-  # test only. prod is deliberately dispatch-only: a merge into prod must not
-  # deploy on its own, because a push carries no way to say which release it is.
-  # Production goes out by picking a tag in Run workflow.
-  push:
-    branches: [test]
-    paths-ignore:
-      # Warehouse-only change = schema change = deploy-warehouse.yml's job.
-      - 'fabric/*.Warehouse/**'
   workflow_dispatch:
     inputs:
       environment:
@@ -41,9 +37,9 @@ permissions:
   id-token: write
 
 concurrency:
-  # Keyed on the workspace, not the branch — test and prod must not queue behind
-  # each other. Never cancelled: a half-applied publish is worse than a slow one.
-  group: deploy-to-fabric-${{ inputs.environment || github.ref_name }}
+  # Keyed on the workspace: test and prod must not queue behind each other.
+  # Never cancelled — a half-applied publish is worse than a slow one.
+  group: deploy-to-fabric-${{ inputs.environment }}
   cancel-in-progress: false
 
 jobs:
@@ -68,24 +64,13 @@ jobs:
       - name: Install validation dependencies
         run: pip install pyyaml
 
-      # A push carries no inputs, so the branch name is the environment. A
-      # dispatch off a tag always has the dropdown, since github.ref_name would
-      # be "v1.2.0" there — neither a workspace nor a parameter.yml key.
+      # inputs.environment is a required choice input, so this is always one of
+      # test/prod — no fallback or validation needed.
       - name: Resolve target environment
         id: target
         run: |
-          TARGET="${{ inputs.environment }}"
-          TARGET="${TARGET:-${{ github.ref_name }}}"
-          case "$TARGET" in
-            test|prod) ;;
-            *)
-              echo "::error::Unsupported environment '$TARGET'. Expected test or prod."
-              echo "::error::Running from a tag? Use Run workflow and pick the environment."
-              exit 1
-              ;;
-          esac
-          echo "env=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "Target environment : $TARGET"
+          echo "env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          echo "Target environment : ${{ inputs.environment }}"
           echo "Deploying ref      : ${{ github.ref }}"
 
       - name: Validate repository
