@@ -1,0 +1,207 @@
+# .github/workflows/deploy-warehouse.yml
+#
+# The warehouse SCHEMA only: dacpac build, SqlPackage publish, backfill procs.
+# Separate from deploy-to-fabric.yml because it is the one pipeline needing
+# .NET, SqlPackage and msodbcsql18.
+#
+# It does NOT create the Warehouse item — deploy-to-fabric.yml publishes every
+# item shell. That split keeps the two from writing the same item at once.
+# So a brand-new warehouse needs one deploy-to-fabric.yml run first; until then
+# the endpoint lookup below fails and lists the warehouses that do exist.
+
+name: Deploy warehouse
+
+on:
+  push:
+    branches: [test, prod]
+    paths:
+      # Not '**/*.Warehouse/**': GitHub's '**' is a character wildcard, so it
+      # would demand the item sit two levels deep. Items live directly in fabric/.
+      - 'fabric/*.Warehouse/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Choose target workspace'
+        required: true
+        type: choice
+        options:
+          - test
+          - prod
+        default: test
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  # Keyed on the target workspace rather than the branch — see deploy-to-fabric.yml.
+  group: deploy-warehouse-${{ inputs.environment || github.ref_name }}
+  cancel-in-progress: false
+
+env:
+  WAREHOUSE: insurance_WH
+  POPULATE_PROCS: >-
+    Bronze.usp_populate_new_columns
+    Gold.usp_populate_new_columns
+
+jobs:
+  validate:
+    name: Validate repository structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      target_env: ${{ steps.target.outputs.env }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - run: pip install pyyaml
+
+      # A push carries no inputs, so the branch name is the environment. A
+      # dispatch off a tag always has the dropdown, since github.ref_name would
+      # be "v1.2.0" there.
+      - name: Resolve target environment
+        id: target
+        run: |
+          TARGET="${{ inputs.environment }}"
+          TARGET="${TARGET:-${{ github.ref_name }}}"
+          case "$TARGET" in
+            test|prod) ;;
+            *)
+              echo "::error::Unsupported environment '$TARGET'. Expected test or prod."
+              echo "::error::Running from a tag? Use Run workflow and pick the environment."
+              exit 1
+              ;;
+          esac
+          echo "env=$TARGET" >> "$GITHUB_OUTPUT"
+          echo "Target environment : $TARGET"
+          echo "Deploying ref      : ${{ github.ref }}"
+
+      - name: Validate repository
+        run: python cicd/validate_repo.py --target-env "${{ steps.target.outputs.env }}"
+
+  deploy:
+    name: Publish warehouse schema
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ${{ needs.validate.outputs.target_env }}
+    timeout-minutes: 40
+
+    env:
+      TARGET_ENV: ${{ needs.validate.outputs.target_env }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.x"
+
+      # Resolved once here so no later step repeats the lookup. An unset variable
+      # expands to empty and would deploy into nothing.
+      - name: Resolve target workspace
+        run: |
+          WS_ID="${{ vars[format('{0}_WORKSPACE_ID', needs.validate.outputs.target_env)] }}"
+          WS_NAME="${{ vars[format('{0}_WORKSPACE_NAME', needs.validate.outputs.target_env)] }}"
+          ENV_UC="$(echo "$TARGET_ENV" | tr 'a-z' 'A-Z')"
+          [ -n "$WS_ID" ]   || { echo "::error::Variable ${ENV_UC}_WORKSPACE_ID is not set for environment '$TARGET_ENV'"; exit 1; }
+          [ -n "$WS_NAME" ] || { echo "::error::Variable ${ENV_UC}_WORKSPACE_NAME is not set for environment '$TARGET_ENV'"; exit 1; }
+          {
+            echo "WORKSPACE_ID=$WS_ID"
+            echo "WORKSPACE_NAME=$WS_NAME"
+          } >> "$GITHUB_ENV"
+          echo "Into workspace : $WS_NAME ($WS_ID)"
+
+      - name: Install tooling
+        run: |
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+          pip install -r cicd/requirements.txt
+          dotnet tool install --global microsoft.sqlpackage
+          echo '{"sdk":{"version":"8.0.0","rollForward":"latestMinor"}}' > global.json
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch Deploy SP credentials
+        run: |
+          for name in tenant-id client-id client-secret; do
+            value=$(az keyvault secret show --name "deploy-sp-$name" \
+              --vault-name "${{ secrets.AZURE_KEYVAULT_NAME }}" --query value -o tsv)
+            echo "::add-mask::$value"
+            echo "AZURE_$(echo "$name" | tr 'a-z-' 'A-Z_')=$value" >> "$GITHUB_ENV"
+          done
+
+      # fabric-cicd is never called here. If the Warehouse item does not exist
+      # yet, this step fails and lists the warehouses that do.
+      - name: Resolve SQL endpoint
+        run: |
+          python cicd/grant_and_get_endpoints.py \
+            --workspace-id "$WORKSPACE_ID" \
+            --warehouse-names "$WAREHOUSE"
+
+      # GITHUB_ENV only takes effect in later steps, so the check lives here.
+      - name: Build dacpac
+        run: |
+          [ -n "${INSURANCE_WH_ENDPOINT:-}" ] || { echo "::error::endpoint not resolved"; exit 1; }
+          dotnet build fabric/$WAREHOUSE.Warehouse/$WAREHOUSE.sqlproj \
+            --configuration Release --output dacpac-out
+          CONN="Server=tcp:$INSURANCE_WH_ENDPOINT,1433;Initial Catalog=$WAREHOUSE;Encrypt=True;Connection Timeout=30;Authentication=Active Directory Service Principal;User Id=$AZURE_CLIENT_ID;Password=$AZURE_CLIENT_SECRET"
+          echo "::add-mask::$CONN"
+          echo "CONN=$CONN" >> "$GITHUB_ENV"
+
+      # Report + script are produced before anything is applied, so the run
+      # always has a record of what the publish was about to do.
+      - name: Preview changes
+        run: |
+          mkdir -p audit
+          for action in DeployReport:deploy-report.xml Script:deploy-script.sql; do
+            sqlpackage /Action:${action%%:*} \
+              /SourceFile:dacpac-out/$WAREHOUSE.dacpac \
+              /TargetConnectionString:"$CONN" \
+              /OutputPath:audit/${action##*:} \
+              /p:AllowIncompatiblePlatform=true \
+              /p:BlockOnPossibleDataLoss=true \
+              /p:DropObjectsNotInSource=false
+          done
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: warehouse-audit-${{ github.run_id }}
+          path: audit/
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Publish schema
+        run: |
+          sqlpackage /Action:Publish \
+            /SourceFile:dacpac-out/$WAREHOUSE.dacpac \
+            /TargetConnectionString:"$CONN" \
+            /p:AllowIncompatiblePlatform=true \
+            /p:BlockOnPossibleDataLoss=true \
+            /p:DropObjectsNotInSource=false
+
+      # Backfill runs as plain SQL against the endpoint just published to.
+      - name: Populate new columns
+        run: |
+          for proc in $POPULATE_PROCS; do
+            echo "::group::$proc"
+            python cicd/run_sql.py \
+              --server "$INSURANCE_WH_ENDPOINT" \
+              --database "$WAREHOUSE" \
+              --procedure "$proc" \
+              --skip-if-missing
+            echo "::endgroup::"
+          done
