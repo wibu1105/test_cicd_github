@@ -1,8 +1,9 @@
 name: Deploy to Fabric
 
-# Publishes every Fabric item, then runs the lakehouse schema notebook.
-# deploy-warehouse.yml owns the warehouse schema (dacpac); here the Warehouse is
-# only an item shell.
+# Publishes every Fabric item and nothing more — it runs none of them.
+# run-fabric-item.yml executes notebooks, pipelines and stored procedures;
+# deploy-warehouse.yml owns the warehouse schema. Here the Warehouse is only an
+# item shell.
 #
 # Warehouse and Lakehouse stay in --items-in-scope because fabric-cicd resolves
 # $items.<Type>.<name>.$id only for types in scope for that run — parameter.yml
@@ -85,7 +86,6 @@ jobs:
 
     env:
       TARGET_ENV: ${{ needs.validate.outputs.target_env }}
-      SCHEMA_NOTEBOOK: nb_lakehouse_schema
       ITEMS_IN_SCOPE: >-
         ${{ inputs.items_in_scope
             || '["Lakehouse","Warehouse","Notebook","DataPipeline","SemanticModel","Report"]' }}
@@ -165,17 +165,6 @@ jobs:
             --items-in-scope "$ITEMS_IN_SCOPE" \
             --unpublish-orphans "$UNPUBLISH_ORPHANS"
 
-      # After the publish, which is what creates the notebook. No
-      # --skip-if-missing: absent now means the publish dropped it.
-      - name: Apply lakehouse schema
-        run: |
-          python cicd/trigger_job.py \
-            --workspace-id "$WORKSPACE_ID" \
-            --item-name "$SCHEMA_NOTEBOOK" \
-            --item-type Notebook \
-            --wait \
-            --timeout-minutes 20
-
       - name: Deployment summary
         if: always()
         run: |
@@ -198,8 +187,14 @@ jobs:
             echo "- A verbatim \`\$items.\` token in a deployed definition means the"
             echo "  item type left --items-in-scope."
             echo ""
-            echo "### Manual steps"
+            echo "### Next steps"
             echo ""
-            echo "- Bind credentials on \`sales_semantic_model\` (needs interactive sign-in)."
-            echo "- Load Bronze, then run \`pl_silver\` to populate Gold."
+            echo "This published definitions; it ran nothing. Use **Run Fabric item**:"
+            echo ""
+            echo "- \`nb_lakehouse_schema\` (Notebook) — creates the lakehouse tables."
+            echo "  A new workspace has none until this runs."
+            echo "- \`pl_silver\` (DataPipeline) — populates Gold, once Bronze has data."
+            echo ""
+            echo "Bind credentials on \`sales_semantic_model\` by hand — Fabric needs"
+            echo "an interactive sign-in."
           } >> "$GITHUB_STEP_SUMMARY"

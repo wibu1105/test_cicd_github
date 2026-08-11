@@ -46,7 +46,7 @@ and then reads from the wrong workspace.
 
 ### `deploy-to-fabric.yml`
 
-Publishes **every Fabric item**, then applies the lakehouse schema.
+Publishes **every Fabric item** — and runs none of them.
 
 Trigger: Run workflow only.
 
@@ -54,7 +54,6 @@ Trigger: Run workflow only.
 validate  →  resolve workspace  →  Azure login + Key Vault
           →  stage parameter.yml
           →  publish items
-          →  run nb_lakehouse_schema
 ```
 
 Warehouse and Lakehouse are in `--items-in-scope`, but only their **item shell**
@@ -64,9 +63,9 @@ is published here — no schema. They are in scope because `fabric-cicd` resolve
 
 ### `deploy-warehouse.yml`
 
-The warehouse **schema** only: dacpac build, SqlPackage publish, backfill procs.
-Separate because it is the one pipeline needing .NET, SqlPackage and
-msodbcsql18.
+The warehouse **schema** only: dacpac build, SqlPackage publish. It changes
+shape, never data. Separate because it is the one pipeline needing .NET,
+SqlPackage and msodbcsql18.
 
 Trigger: Run workflow only.
 
@@ -74,16 +73,29 @@ Trigger: Run workflow only.
 validate  →  resolve SQL endpoint  →  build dacpac
           →  preview (report + script, uploaded as an artifact)
           →  publish schema
-          →  run backfill procs
 ```
 
 It does **not** create the Warehouse item — `deploy-to-fabric.yml` owns every
 item shell. That split is what stops the two workflows from writing the same
-item at once on a commit that touches both.
+item at once.
 
 Consequence: a brand-new warehouse needs one `deploy-to-fabric.yml` run first.
 Until then this workflow fails at the endpoint lookup and lists the warehouses
 that do exist.
+
+### `run-fabric-item.yml`
+
+Executes one thing in a workspace. Deploying publishes definitions; this runs
+them, so a failure here means the code is wrong rather than the deploy.
+
+| `item_type` | `item_name` | Goes through |
+|---|---|---|
+| `Notebook` | `nb_lakehouse_schema` | Fabric REST API, polled to completion |
+| `DataPipeline` | `pl_silver` | same |
+| `StoredProcedure` | `Gold.usp_populate_new_columns` | ODBC against the warehouse |
+
+Unlike the deploy path, a missing item fails the run. Asking for something by
+name and not getting it is a mistake, not a no-op.
 
 ## Deploying
 
@@ -117,6 +129,21 @@ The usual order is deploy to `test`, look at the result in Fabric, then run the
 same tag again against `prod` — but nothing enforces that order. Nothing stops
 tagging straight to `prod` either; the approval gate is the only checkpoint.
 
+### After a deploy
+
+A deploy publishes definitions and stops. Anything that has to *execute* is a
+separate run of **Run Fabric item**:
+
+| After | Run | Because |
+|---|---|---|
+| Deploy to Fabric, on a new workspace | `nb_lakehouse_schema` (Notebook) | the lakehouse has no tables until it does |
+| Deploy warehouse, when the release added a column | `Bronze.usp_populate_new_columns`, then the Gold one | Gold reads from Bronze, so the order matters |
+| Bronze has new data | `pl_silver` (DataPipeline) | populates Gold |
+
+Splitting them is deliberate: publishing a definition is safe to repeat,
+running one is not always. Adding a column and deciding to populate it are two
+decisions, and a deploy should not make the second one for you.
+
 > **A dispatch runs the workflow file as it exists in the selected ref**, not the
 > latest one. The *form* comes from the default branch, the *execution* comes
 > from the tag. A tag older than an input will show that input on the form and
@@ -145,7 +172,8 @@ Three rules:
 - **`SELECT` at the end.** `run_sql.py` echoes every result set, so the run log
   shows how many rows were actually backfilled rather than just "it ran".
 
-Procs run in the order listed in `POPULATE_PROCS`: Bronze before Gold, because
+Deploying the schema does **not** run the procs. After `Deploy warehouse`, run
+them yourself through **Run Fabric item** — Bronze first, Gold second, because
 Gold reads from Bronze.
 
 `BlockOnPossibleDataLoss=true` is set, so adding a column is fine but dropping
@@ -187,8 +215,8 @@ and production.
 |---|---|---|
 | `deploy.py` | both deploy workflows | `fabric_cicd.publish_all_items`, scoped by `--items-in-scope` |
 | `grant_and_get_endpoints.py` | deploy-warehouse | reads the SQL endpoint, grants the SP `db_ddladmin` |
-| `run_sql.py` | deploy-warehouse | `EXEC` a stored procedure, echo its result sets |
-| `trigger_job.py` | deploy-to-fabric | runs a notebook/pipeline through the Fabric REST API, polls to completion |
+| `run_sql.py` | run-fabric-item | `EXEC` a stored procedure, echo its result sets |
+| `trigger_job.py` | run-fabric-item | runs a notebook/pipeline through the Fabric REST API, polls to completion |
 | `validate_repo.py` | validate-pr, both deploys | every static check |
 | `parameter.yml` | deploy-to-fabric | environment-specific ids, one key per environment |
 
