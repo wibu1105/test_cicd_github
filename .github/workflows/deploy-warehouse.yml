@@ -12,8 +12,9 @@
 name: Deploy warehouse
 
 on:
+  # test only — prod is dispatch-only. See deploy-to-fabric.yml.
   push:
-    branches: [test, prod]
+    branches: [test]
     paths:
       # Not '**/*.Warehouse/**': GitHub's '**' is a character wildcard, so it
       # would demand the item sit two levels deep. Items live directly in fabric/.
