@@ -52,3 +52,7 @@ jobs:
           # Left in place so moving the repo into an org is a settings change
           # rather than a workflow change.
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          # Named rather than relying on auto-detection, so a rename or a move
+          # fails loudly instead of silently falling back to the default rules
+          # and dropping the Fabric-specific ones.
+          GITLEAKS_CONFIG: .gitleaks.toml

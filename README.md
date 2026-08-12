@@ -58,6 +58,9 @@ A finding fails the run and comments on the pull request. Treat a hit as a
 **rotate the credential** signal, not a "delete the line" one: removing a secret
 in a later commit leaves it in the history, where it is still readable.
 
+Rules, the rotation runbook, and how to tune a false positive without switching
+the scanner off: [`GITLEAKS.md`](GITLEAKS.md).
+
 ### `deploy-to-fabric.yml`
 
 Publishes **every Fabric item** — and runs none of them.
