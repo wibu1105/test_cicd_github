@@ -93,22 +93,102 @@ password rule excludes template syntax with a character class rather than
 
 ## Running it locally
 
-Not set up, and not required — CI covers every push. Worth knowing the option
-exists, because CI catches a leak *after* it is in history, which always costs a
-rotation. A pre-commit hook stops it before the commit exists.
+Optional — CI covers every push either way. The reason to bother: CI finds a
+leak *after* it is in history, and that always costs a credential rotation. A
+pre-commit hook stops the commit from existing, so there is nothing to rotate.
 
-```bash
-winget install gitleaks           # standalone binary, no Python needed
-gitleaks detect --config .gitleaks.toml     # full history
-gitleaks protect --staged                   # staged changes only, ~1s
+Not currently set up in this repo. Each person sets it up on their own machine.
+
+### 1. Install the binary
+
+Standalone Go binary — no Python, no Node.
+
+```powershell
+winget install gitleaks
 ```
 
-To share a hook through the repo, put it in a committed `.githooks/` folder and
-point git at it once per clone:
+Alternatives: `scoop install gitleaks`, `choco install gitleaks`, or the `.exe`
+from <https://github.com/gitleaks/gitleaks/releases>.
+
+Check it took:
+
+```bash
+gitleaks version
+```
+
+### 2. Scan by hand
+
+```bash
+# staged changes only — what the hook will run, ~1s
+gitleaks protect --staged --redact --config .gitleaks.toml --verbose
+
+# whole history — what CI runs nightly, slower
+gitleaks detect --redact --config .gitleaks.toml
+```
+
+`--redact` keeps the matched value out of your terminal and scrollback. Without
+it you paste the secret somewhere new while asking about it.
+
+> Gitleaks ≥ 8.19 prints a deprecation notice for `detect` and `protect` and
+> prefers `gitleaks git`. Both still work. If a command errors outright, check
+> `gitleaks --help` for the form your version wants.
+
+### 3. Wire it into the hook
+
+`.git/hooks/` is not tracked by git, so a hook placed there cannot be shared.
+Point git at a tracked folder instead:
+
+```bash
+mkdir -p .githooks
+```
+
+`.githooks/pre-commit`:
+
+```sh
+#!/usr/bin/env sh
+# Aborts the commit when gitleaks finds a secret in the staged changes.
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "gitleaks not installed — skipping scan (CI will still catch it)"
+  exit 0
+fi
+
+gitleaks protect --staged --redact --config .gitleaks.toml --verbose
+```
+
+Then, **once per clone**:
 
 ```bash
 git config core.hooksPath .githooks
+chmod +x .githooks/pre-commit    # Git Bash / WSL; not needed on Windows-only
 ```
 
-A hook is bypassable (`git commit --no-verify`) and only exists where it is
-installed, so it complements the workflow rather than replacing it.
+Git for Windows ships its own `sh`, so the script runs from Git Bash, PowerShell
+and the VS Code UI alike.
+
+The `command -v` guard matters: without it, anyone who has not installed the
+binary cannot commit at all. A missing scanner should degrade to CI, not block
+the repo.
+
+### 4. Check it actually fires
+
+```bash
+echo 'password=hunter2supersecret' > leak-test.txt
+git add leak-test.txt
+git commit -m "test"     # should be refused
+rm leak-test.txt && git reset
+```
+
+If the commit goes through, `core.hooksPath` did not take — confirm with
+`git config core.hooksPath`.
+
+### Bypassing
+
+```bash
+git commit --no-verify
+```
+
+Left available deliberately. A hook that cannot be skipped gets deleted the
+first time it is wrong. CI is the layer that cannot be skipped, which is why
+both exist: the hook catches the ordinary slip, the workflow catches everything
+else.
