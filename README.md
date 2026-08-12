@@ -44,6 +44,23 @@ runner: no Fabric API calls, no secrets, so it is safe on unreviewed branches.
 The last three catch the failure mode that matters: an item that deploys green
 and then reads from the wrong workspace.
 
+### `gitleaks.yml`
+
+Scans the working tree and git history for hardcoded secrets. The only workflow
+here that is **not** dispatch-only: it runs on every push and pull request, plus
+daily at 04:00.
+
+That is deliberate. A scanner nobody remembers to run catches nothing, and the
+window that matters is the push that introduced the leak — before it reaches
+another branch.
+
+A finding fails the run and comments on the pull request. Treat a hit as a
+**rotate the credential** signal, not a "delete the line" one: removing a secret
+in a later commit leaves it in the history, where it is still readable.
+
+Rules, the rotation runbook, and how to tune a false positive without switching
+the scanner off: [`GITLEAKS.md`](GITLEAKS.md).
+
 ### `deploy-to-fabric.yml`
 
 Publishes **every Fabric item** — and runs none of them.
