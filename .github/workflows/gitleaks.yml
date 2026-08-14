@@ -1,15 +1,7 @@
-# .github/workflows/gitleaks.yml
+# Secret scanning. See GITLEAKS.md for the runbook.
 #
-# Scans for hardcoded secrets — passwords, API keys, tokens — in the working
-# tree and in git history.
-#
-# Unlike the deploy workflows this one is NOT dispatch-only. A secret scanner is
-# worth nothing if it waits for someone to remember it: the value is catching a
-# leak in the push that introduced it, before it spreads to another branch or
-# gets pulled by someone else.
-#
-# The scheduled run exists because rules improve over time. A commit that looked
-# clean last month can match a rule added since, and only a full re-scan finds it.
+# The only workflow here that is not dispatch-only: a scanner is worth nothing
+# if it waits to be remembered.
 
 name: Gitleaks
 
@@ -17,18 +9,20 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+  # Only fires from the default branch. Rules improve, so a commit that looked
+  # clean last month can match a rule added since.
   schedule:
     - cron: "0 4 * * *"
 
 permissions:
   contents: read
-  # gitleaks-action comments on the pull request that introduced a leak.
   pull-requests: write
-  security-events: write
 
 concurrency:
   group: gitleaks-${{ github.ref }}
-  cancel-in-progress: true
+  # Not cancelled. A push run scans only that push's commits, so cancelling one
+  # leaves its range unscanned until the nightly sweep.
+  cancel-in-progress: false
 
 jobs:
   scan:
@@ -37,9 +31,8 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # fetch-depth: 0 is required, not a preference. The default shallow clone
-      # has no history to scan, so a secret committed and then removed — the
-      # case that matters most, since it is still in the log — would be missed.
+      # fetch-depth: 0 is required. A shallow clone has no history, so a secret
+      # committed and later removed — the case that matters — would be missed.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
@@ -47,12 +40,8 @@ jobs:
       - uses: gitleaks/gitleaks-action@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Only organization accounts need a licence; this repo is under a
-          # personal account, so the secret is unset and the variable is empty.
-          # Left in place so moving the repo into an org is a settings change
-          # rather than a workflow change.
+          # Organizations only; unset here, so this resolves empty.
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-          # Named rather than relying on auto-detection, so a rename or a move
-          # fails loudly instead of silently falling back to the default rules
-          # and dropping the Fabric-specific ones.
+          # Named, not auto-detected: a rename then fails loudly instead of
+          # silently falling back to defaults and dropping the Fabric rules.
           GITLEAKS_CONFIG: .gitleaks.toml
