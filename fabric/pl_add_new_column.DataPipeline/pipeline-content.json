@@ -1,0 +1,42 @@
+{
+  "properties": {
+    "activities": [
+      {
+        "type": "Script",
+        "typeProperties": {
+          "scripts": [
+            {
+              "text": {
+                "value": "ALTER TABLE Bronze.customer\nADD is_active INT NULL;\n\nUPDATE Bronze.customer\nSET is_active = 1;",
+                "type": "Expression"
+              },
+              "type": "NonQuery"
+            }
+          ],
+          "scriptBlockExecutionTimeout": "02:00:00"
+        },
+        "linkedService": {
+          "name": "insurance_WH",
+          "properties": {
+            "type": "DataWarehouse",
+            "typeProperties": {
+              "artifactId": "bffd60c6-9791-985f-41e0-8c375e59288a",
+              "endpoint": "3ukzqa5oadlurln3behjhxf4ae-ogaygjzm7g3ere37qt24mc6qt4.datawarehouse.fabric.microsoft.com",
+              "workspaceId": "00000000-0000-0000-0000-000000000000"
+            },
+            "annotations": []
+          }
+        },
+        "policy": {
+          "timeout": "0.12:00:00",
+          "retry": 0,
+          "retryIntervalInSeconds": 30,
+          "secureInput": false,
+          "secureOutput": false
+        },
+        "name": "Script1",
+        "dependsOn": []
+      }
+    ]
+  }
+}

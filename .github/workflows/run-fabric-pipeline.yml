@@ -1,4 +1,4 @@
-name: Run post-deploy Fabric pipeline
+name: Run Fabric Pipeline
 
 on:
   workflow_dispatch:
