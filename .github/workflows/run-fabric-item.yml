@@ -1,0 +1,150 @@
+# .github/workflows/run-fabric-item.yml
+#
+# Executes something in a workspace: a notebook, a data pipeline, or a warehouse
+# stored procedure. Separate from the deploy workflows on purpose — deploying
+# publishes definitions, this runs them. A failed run here means the code is
+# wrong, not that the deploy was.
+
+name: Run Fabric item
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Choose target workspace'
+        required: true
+        type: choice
+        options:
+          - test
+          - prod
+        default: test
+      item_type:
+        description: 'What to run'
+        required: true
+        type: choice
+        options:
+          - Notebook
+          - DataPipeline
+          - StoredProcedure
+        default: Notebook
+      item_name:
+        description: 'Item display name (nb_lakehouse_schema), or Schema.proc for StoredProcedure'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: run-fabric-item-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Run ${{ inputs.item_name }} in ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 60
+
+    env:
+      TARGET_ENV: ${{ inputs.environment }}
+      WAREHOUSE: insurance_WH
+      # Read through the environment rather than interpolated into a run: block,
+      # so a display name can never be read as shell.
+      ITEM_NAME: ${{ inputs.item_name }}
+      ITEM_TYPE: ${{ inputs.item_type }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Only the stored-procedure path talks to the warehouse over ODBC.
+      - name: Install ODBC driver
+        if: inputs.item_type == 'StoredProcedure'
+        run: |
+          sudo apt-get update
+          sudo ACCEPT_EULA=Y apt-get install -y msodbcsql18
+
+      - name: Install dependencies
+        run: pip install -r cicd/requirements.txt
+
+      - name: Resolve target workspace
+        run: |
+          WS_ID="${{ vars[format('{0}_WORKSPACE_ID', inputs.environment)] }}"
+          ENV_UC="$(echo "$TARGET_ENV" | tr 'a-z' 'A-Z')"
+          [ -n "$WS_ID" ] || { echo "::error::Variable ${ENV_UC}_WORKSPACE_ID is not set for environment '$TARGET_ENV'"; exit 1; }
+          echo "WORKSPACE_ID=$WS_ID" >> "$GITHUB_ENV"
+          echo "Workspace : $WS_ID"
+
+      - name: Azure login (Reader SP via OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch Deploy SP credentials from Key Vault
+        run: |
+          KV="${{ secrets.AZURE_KEYVAULT_NAME }}"
+          for pair in tenant-id:AZURE_TENANT_ID \
+                      client-id:AZURE_CLIENT_ID \
+                      client-secret:AZURE_CLIENT_SECRET; do
+            secret="deploy-sp-${pair%%:*}"
+            var="${pair##*:}"
+            value="$(az keyvault secret show --vault-name "$KV" \
+                       --name "$secret" --query value -o tsv)"
+            [ -n "$value" ] || { echo "::error::Empty secret: $secret"; exit 1; }
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done
+
+      # ------------------------------------------------------------------
+      # Notebook / DataPipeline
+      # ------------------------------------------------------------------
+      - name: Run item
+        if: inputs.item_type != 'StoredProcedure'
+        run: |
+          python cicd/trigger_job.py \
+            --workspace-id "$WORKSPACE_ID" \
+            --item-name "$ITEM_NAME" \
+            --item-type "$ITEM_TYPE" \
+            --wait \
+            --timeout-minutes 45
+
+      # ------------------------------------------------------------------
+      # Warehouse stored procedure
+      # ------------------------------------------------------------------
+      - name: Resolve SQL endpoint
+        if: inputs.item_type == 'StoredProcedure'
+        run: |
+          python cicd/grant_and_get_endpoints.py \
+            --workspace-id "$WORKSPACE_ID" \
+            --warehouse-names "$WAREHOUSE"
+
+      # No --skip-if-missing: naming a procedure that is not deployed is a
+      # mistake worth failing on, unlike a deploy sweeping over optional hooks.
+      - name: Run stored procedure
+        if: inputs.item_type == 'StoredProcedure'
+        run: |
+          [ -n "${INSURANCE_WH_ENDPOINT:-}" ] || { echo "::error::endpoint not resolved"; exit 1; }
+          python cicd/run_sql.py \
+            --server "$INSURANCE_WH_ENDPOINT" \
+            --database "$WAREHOUSE" \
+            --procedure "$ITEM_NAME"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Ran \`${ITEM_NAME}\`"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Environment | ${TARGET_ENV} |"
+            echo "| Type | ${ITEM_TYPE} |"
+            echo "| Ref | \`${{ github.ref }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

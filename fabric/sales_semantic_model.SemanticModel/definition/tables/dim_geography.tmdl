@@ -1,0 +1,66 @@
+table dim_geography
+	lineageTag: e905bfdd-7d31-4362-8101-e82a7916b5f6
+	sourceLineageTag: [Gold].[dim_geography]
+
+	column geography_key
+		dataType: int64
+		formatString: 0
+		lineageTag: e6b41aca-0c86-4ebf-aa1a-138a071e832d
+		sourceLineageTag: geography_key
+		summarizeBy: none
+		sourceColumn: geography_key
+
+		annotation SummarizationSetBy = Automatic
+
+	column city
+		dataType: string
+		lineageTag: 1f802933-ca6b-4e29-8447-df22b74ad4d5
+		sourceLineageTag: city
+		summarizeBy: none
+		sourceColumn: city
+
+		annotation SummarizationSetBy = Automatic
+
+	column state
+		dataType: string
+		lineageTag: 96276676-cf07-4514-aaf8-1c267af76c56
+		sourceLineageTag: state
+		summarizeBy: none
+		sourceColumn: state
+
+		annotation SummarizationSetBy = Automatic
+
+	column state_code
+		dataType: string
+		lineageTag: 6bde7ccf-dce3-4bb3-8bbb-0840cbe2767b
+		sourceLineageTag: state_code
+		summarizeBy: none
+		sourceColumn: state_code
+
+		annotation SummarizationSetBy = Automatic
+
+	column country
+		dataType: string
+		lineageTag: 50a799eb-a7ff-407f-8539-c4a4670a502b
+		sourceLineageTag: country
+		summarizeBy: none
+		sourceColumn: country
+
+		annotation SummarizationSetBy = Automatic
+
+	column country_code
+		dataType: string
+		lineageTag: aa840f22-aa21-45f6-a446-781209db0bcf
+		sourceLineageTag: country_code
+		summarizeBy: none
+		sourceColumn: country_code
+
+		annotation SummarizationSetBy = Automatic
+
+	partition dim_geography = entity
+		mode: directLake
+		source
+			entityName: dim_geography
+			schemaName: Gold
+			expressionSource: 'DirectLake - insurance_WH'
+

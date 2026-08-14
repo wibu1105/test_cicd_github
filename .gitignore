@@ -1,0 +1,15 @@
+# Running the cicd/ scripts locally leaves bytecode behind.
+__pycache__/
+*.pyc
+
+# Local tool caches
+.ruff_cache/
+
+# Build output — the dacpac is produced by CI and uploaded as an artifact.
+dacpac-out/
+global.json
+
+# deploy-to-fabric.yml copies parameter.yml into the git directory at deploy
+# time, because fabric-cicd only reads it from there. The source of truth is
+# cicd/parameter.yml; this copy exists on the runner only.
+fabric/parameter.yml

@@ -1,0 +1,200 @@
+name: Deploy to Fabric
+
+# Publishes every Fabric item and nothing more — it runs none of them.
+# run-fabric-item.yml executes notebooks, pipelines and stored procedures;
+# deploy-warehouse.yml owns the warehouse schema. Here the Warehouse is only an
+# item shell.
+#
+# Warehouse and Lakehouse stay in --items-in-scope because fabric-cicd resolves
+# $items.<Type>.<name>.$id only for types in scope for that run — parameter.yml
+# needs both ids. Being in scope publishes the shell, nothing more.
+#
+# Dispatch-only, test included: a push carries no way to say which release is
+# going out, so nothing deploys without someone picking a tag and a workspace
+# in Run workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Choose target workspace'
+        required: true
+        type: choice
+        options:
+          - test
+          - prod
+        default: test
+      items_in_scope:
+        description: 'JSON array of item types to publish'
+        required: false
+        default: '["Lakehouse","Warehouse","Notebook","DataPipeline","SemanticModel","Report"]'
+      unpublish_orphans:
+        description: 'DANGER: deletes workspace items absent from the repo, stores included'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  # Keyed on the workspace: test and prod must not queue behind each other.
+  # Never cancelled — a half-applied publish is worse than a slow one.
+  group: deploy-to-fabric-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+
+  validate:
+    name: Validate repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      target_env: ${{ steps.target.outputs.env }}
+
+    steps:
+      # No ref: given — checkout defaults to github.ref, which for a dispatch is
+      # exactly whatever "Use workflow from" was set to. That picker already
+      # lists every branch AND tag, so a release tag needs no dropdown of its own.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install validation dependencies
+        run: pip install pyyaml
+
+      # inputs.environment is a required choice input, so this is always one of
+      # test/prod — no fallback or validation needed.
+      - name: Resolve target environment
+        id: target
+        run: |
+          echo "env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          echo "Target environment : ${{ inputs.environment }}"
+          echo "Deploying ref      : ${{ github.ref }}"
+
+      - name: Validate repository
+        run: python cicd/validate_repo.py --target-env "${{ steps.target.outputs.env }}"
+
+  deploy:
+    name: Deploy to ${{ needs.validate.outputs.target_env }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ needs.validate.outputs.target_env }}
+
+    env:
+      TARGET_ENV: ${{ needs.validate.outputs.target_env }}
+      ITEMS_IN_SCOPE: >-
+        ${{ inputs.items_in_scope
+            || '["Lakehouse","Warehouse","Notebook","DataPipeline","SemanticModel","Report"]' }}
+      UNPUBLISH_ORPHANS: ${{ inputs.unpublish_orphans || 'false' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install deployment dependencies
+        run: pip install -r cicd/requirements.txt
+
+      # Resolved once here so no later step repeats the vars[format(...)] lookup.
+      - name: Resolve workspace and git directory
+        run: |
+          GITDIR="${{ vars.GIT_DIRECTORY }}"
+          GITDIR="${GITDIR:-fabric}"
+          WS_ID="${{ vars[format('{0}_WORKSPACE_ID', needs.validate.outputs.target_env)] }}"
+          WS_NAME="${{ vars[format('{0}_WORKSPACE_NAME', needs.validate.outputs.target_env)] }}"
+
+          # An unset variable expands to empty and would deploy into nothing.
+          # Printed uppercase to match the GitHub UI; vars[] itself is not
+          # case-sensitive.
+          ENV_UC="$(echo "$TARGET_ENV" | tr 'a-z' 'A-Z')"
+          [ -n "$WS_ID" ]   || { echo "::error::Variable ${ENV_UC}_WORKSPACE_ID is not set for environment '$TARGET_ENV'"; exit 1; }
+          [ -n "$WS_NAME" ] || { echo "::error::Variable ${ENV_UC}_WORKSPACE_NAME is not set for environment '$TARGET_ENV'"; exit 1; }
+
+          {
+            echo "GITDIR=$GITDIR"
+            echo "WORKSPACE_ID=$WS_ID"
+            echo "WORKSPACE_NAME=$WS_NAME"
+          } >> "$GITHUB_ENV"
+
+          echo "Publishing from : $GITDIR"
+          echo "Into workspace  : $WS_NAME ($WS_ID)"
+
+      - name: Azure login (Reader SP via OIDC)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch Deploy SP credentials from Key Vault
+        run: |
+          KV="${{ secrets.AZURE_KEYVAULT_NAME }}"
+          for pair in tenant-id:AZURE_TENANT_ID \
+                      client-id:AZURE_CLIENT_ID \
+                      client-secret:AZURE_CLIENT_SECRET; do
+            secret="deploy-sp-${pair%%:*}"
+            var="${pair##*:}"
+            value="$(az keyvault secret show --vault-name "$KV" \
+                       --name "$secret" --query value -o tsv)"
+            [ -n "$value" ] || { echo "::error::Empty secret: $secret"; exit 1; }
+            echo "::add-mask::$value"
+            echo "$var=$value" >> "$GITHUB_ENV"
+          done
+
+      # fabric-cicd only reads parameter.yml from the git directory root.
+      # cicd/parameter.yml is the source of truth; this copy is runner-only.
+      - name: Stage parameter.yml
+        run: |
+          cp cicd/parameter.yml "$GITDIR/parameter.yml"
+          echo "Staged to $GITDIR/parameter.yml"
+
+      # unpublish_orphans defaults to false. Turning it on deletes stores, and
+      # their data, once the repo no longer carries the item folder.
+      - name: Publish items
+        run: |
+          python cicd/deploy.py \
+            --target-env "$TARGET_ENV" \
+            --workspace-name "$WORKSPACE_NAME" \
+            --git-directory "$GITDIR" \
+            --items-in-scope "$ITEMS_IN_SCOPE" \
+            --unpublish-orphans "$UNPUBLISH_ORPHANS"
+
+      - name: Deployment summary
+        if: always()
+        run: |
+          {
+            echo "## Deployment to ${TARGET_ENV}"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Workspace | ${WORKSPACE_NAME:-unresolved} |"
+            echo "| Ref | \`${{ github.ref }}\` |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+            echo "| Git directory | \`${GITDIR:-unresolved}\` |"
+            echo "| Items in scope | \`${ITEMS_IN_SCOPE}\` |"
+            echo ""
+            echo "### Verify"
+            echo ""
+            echo "- \`sales_semantic_model\` lineage: warehouse must sit in **this**"
+            echo "  workspace, not the one it was authored in."
+            echo "- \`nb_lakehouse_schema\` lineage: exactly **one** lakehouse."
+            echo "- A verbatim \`\$items.\` token in a deployed definition means the"
+            echo "  item type left --items-in-scope."
+            echo ""
+            echo "### Next steps"
+            echo ""
+            echo "This published definitions; it ran nothing. Use **Run Fabric item**:"
+            echo ""
+            echo "- \`nb_lakehouse_schema\` (Notebook) — creates the lakehouse tables."
+            echo "  A new workspace has none until this runs."
+            echo "- \`pl_silver\` (DataPipeline) — populates Gold, once Bronze has data."
+            echo ""
+            echo "Bind credentials on \`sales_semantic_model\` by hand — Fabric needs"
+            echo "an interactive sign-in."
+          } >> "$GITHUB_STEP_SUMMARY"

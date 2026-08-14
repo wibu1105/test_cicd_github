@@ -1,0 +1,109 @@
+# cicd/parameter.yml
+
+key_value_replace:
+
+  # ------------------------------------------------------------------
+  # DataPipeline pl_silver -> notebook activity "Notebook1"
+  #
+  # The activity name below MUST match the "name" field of the notebook
+  # activity in pipeline-content.json. Yours is "Notebook1".
+  # ------------------------------------------------------------------
+  - find_key: $.properties.activities[?(@.name=="Notebook1")].typeProperties.notebookId
+    replace_value:
+      prod: "$items.Notebook.nb_transform.$id"
+      test: "$items.Notebook.nb_transform.$id"
+    item_type: "DataPipeline"
+
+  - find_key: $.properties.activities[?(@.name=="Notebook1")].typeProperties.workspaceId
+    replace_value:
+      prod: "$workspace.$id"
+      test: "$workspace.$id"
+    item_type: "DataPipeline"
+
+find_replace:
+
+  # ==================================================================
+  # 1. Semantic model -> warehouse, over OneLake (Direct Lake)
+  #
+  # sales_semantic_model is a DIRECT LAKE model. Its source is a OneLake path,
+  # not a SQL endpoint:
+  #
+  #   AzureStorage.DataLake("https://onelake.dfs.fabric.microsoft.com/<workspace>/<item>")
+  #
+  # The string "Sql.Database" appears nowhere in this repo, so rules written
+  # against it match nothing and the model deploys still reading dev's OneLake.
+  # The path carries two GUIDs and each needs its own single-group rule.
+  #
+  # Order does not matter: rule 1b matches on GUID shape, so it still finds the
+  # item segment after 1a has swapped the workspace segment for another GUID.
+  # ==================================================================
+
+  # 1a. first path segment -> the target workspace
+  - find_value: 'onelake\.dfs\.fabric\.microsoft\.com/([0-9a-fA-F-]{36})/'
+    is_regex: "true"
+    replace_value:
+      prod: "$workspace.$id"
+      test: "$workspace.$id"
+    item_type: "SemanticModel"
+
+  # 1b. second path segment -> item id of insurance_WH in the target workspace
+  - find_value: 'onelake\.dfs\.fabric\.microsoft\.com/[0-9a-fA-F-]{36}/([0-9a-fA-F-]{36})'
+    is_regex: "true"
+    replace_value:
+      prod: "$items.Warehouse.insurance_WH.$id"
+      test: "$items.Warehouse.insurance_WH.$id"
+    item_type: "SemanticModel"
+
+  # ==================================================================
+  # 2. nb_lakehouse_schema -> its attached lakehouse
+  #
+  # Fabric writes the attached lakehouse's REAL ITEM ID here, not the logicalId
+  # from .platform, so it does not travel between workspaces on its own. (The
+  # warehouse block in nb_transform is not symmetric -- see section 3.)
+  #
+  # Each GUID is matched through its surrounding METADATA context, never on GUID
+  # shape alone: a bare GUID pattern would happily rewrite any other GUID in the
+  # file.
+  # ==================================================================
+
+  # 2a. the default attachment
+  - find_value: '\#\s*META\s+"default_lakehouse":\s*"([0-9a-fA-F-]{36})"'
+    is_regex: "true"
+    replace_value:
+      prod: "$items.Lakehouse.test_LH.$id"
+      test: "$items.Lakehouse.test_LH.$id"
+    item_type: "Notebook"
+
+  # 2b. the workspace the attached lakehouse lives in
+  #     Fabric rejects the notebook outright if this field is empty or stale.
+  - find_value: '\#\s*META\s+"default_lakehouse_workspace_id":\s*"([0-9a-fA-F-]{36})"'
+    is_regex: "true"
+    replace_value:
+      prod: "$workspace.$id"
+      test: "$workspace.$id"
+    item_type: "Notebook"
+
+  # 2c. the SAME id again, inside known_lakehouses.
+  - find_value: '"known_lakehouses":\s*\[\s*\#\s*META\s*\{\s*\#\s*META\s+"id":\s*"([0-9a-fA-F-]{36})"'
+    is_regex: "true"
+    replace_value:
+      prod: "$items.Lakehouse.test_LH.$id"
+      test: "$items.Lakehouse.test_LH.$id"
+    item_type: "Notebook"
+
+   # ==================================================================
+  # 4. DataPipeline -> insurance_WH SQL endpoint
+  #
+  # Fabric pipeline content can persist the SQL endpoint hostname of the
+  # warehouse from the authoring workspace. Replace it dynamically with
+  # insurance_WH's SQL endpoint in the target workspace.
+  # ==================================================================
+
+  - find_value: '([a-zA-Z0-9-]+\.datawarehouse\.fabric\.microsoft\.com)'
+    is_regex: "true"
+    replace_value:
+      prod: "$items.Warehouse.insurance_WH.$sqlendpoint"
+      test: "$items.Warehouse.insurance_WH.$sqlendpoint"
+    item_type: "DataPipeline"
+   
+ 
