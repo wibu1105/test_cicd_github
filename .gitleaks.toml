@@ -1,0 +1,66 @@
+# Gitleaks rules for this repo. See GITLEAKS.md.
+
+title = "Fabric CI/CD"
+
+# The ~200 upstream rules (AWS keys, GitHub PATs, private keys, generic
+# high-entropy assignments) stay on. Everything below is additive: shapes that
+# are specific to Fabric and that the defaults do not know about.
+[extend]
+useDefault = true
+
+# ----------------------------------------------------------------------------
+# Rules
+# ----------------------------------------------------------------------------
+
+# Password=<literal>. The leading class excludes $ and {, so the templated forms
+# this repo uses pass: Password=$AZURE_CLIENT_SECRET, PWD={client_secret}.
+# Go RE2 has no lookahead, hence a character class rather than (?!\$).
+[[rules]]
+id = "fabric-connection-string-password"
+description = "Literal password in a warehouse connection string"
+regex = '''(?i)(?:password|pwd)\s*=\s*([^$;"'\s{][^;"'\s]{7,})'''
+keywords = ["password", "pwd"]
+tags = ["fabric", "warehouse", "connection-string"]
+
+# A Fabric REST API JWT pasted in while debugging. Short-lived, which is exactly
+# why people paste them and forget.
+[[rules]]
+id = "fabric-api-bearer-token"
+description = "Fabric or Power BI API bearer token"
+regex = '''(?i)bearer\s+(eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,})'''
+keywords = ["bearer"]
+tags = ["fabric", "token"]
+
+# A OneLake/ADLS URL carrying a SAS token. The repo is full of legitimate
+# onelake.dfs.fabric.microsoft.com paths, so the URL itself is not the signal —
+# the sig= parameter is. A SAS grants direct data access and does not expire
+# when someone leaves.
+[[rules]]
+id = "fabric-onelake-sas-token"
+description = "Azure Storage / OneLake SAS token"
+regex = '''(?i)[?&]sig=([A-Za-z0-9%+/=]{20,})'''
+keywords = ["sig="]
+tags = ["fabric", "onelake", "sas"]
+
+# ----------------------------------------------------------------------------
+# Allowlist
+#
+# Add entries on evidence only. Allowlisting preemptively is how a scanner
+# quietly stops finding things.
+#
+# fabric/ is deliberately NOT excluded. It is the noisiest folder — workspace
+# GUIDs, logicalIds, OneLake paths — and also exactly where a token would get
+# pasted while debugging a notebook.
+# ----------------------------------------------------------------------------
+[allowlist]
+description = "Secret-shaped values that are public"
+regexTarget = "match"
+regexes = [
+  '''\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}''',   # only the name is in the repo
+  '''\$items\.[A-Za-z]+\.[^.\s]+\.\$[a-z]+''',             # fabric-cicd placeholder
+  '''\$workspace\.\$id''',
+]
+
+paths = [
+  '''dacpac-out/''',   # build output, gitignored
+]
