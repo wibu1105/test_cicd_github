@@ -1,24 +1,18 @@
 # Secret scanning. See GITLEAKS.md for the runbook.
 #
-# The only workflow here that is not dispatch-only: a scanner is worth nothing
-# if it waits to be remembered.
-#
-# Runs the pinned gitleaks binary rather than gitleaks-action. The action is
-# licensed per organization (GITLEAKS_LICENSE); it is free while this repo sits
-# under a user account, and would start failing every run the day the repo moves
-# into one. The binary carries no such condition.
+# Uses the pinned binary, not gitleaks-action: the action is licensed per
+# organization, so it would start failing the day this repo moves into one.
 
 name: Gitleaks
 
 on:
-  # Long-lived branches only. Feature branches are already covered by
-  # pull_request, and listing them in both places scans the same commits twice.
+  # push covers the long-lived branches, pull_request covers everything else.
+  # Listing feature branches in both would scan the same commits twice.
   push:
     branches: [dev, test, prod]
   pull_request:
   workflow_dispatch:
-  # Only fires from the default branch. Rules improve, so a commit that looked
-  # clean last month can match a rule added since.
+  # Rules improve: a commit that looked clean last month can match a new one.
   schedule:
     - cron: "0 4 * * *"
 
@@ -27,8 +21,8 @@ permissions:
 
 concurrency:
   group: gitleaks-${{ github.ref }}
-  # Not cancelled. A push run scans only that push's commits, so cancelling one
-  # leaves its range unscanned until the nightly sweep.
+  # Not cancelled — a push run scans only its own commits, so cancelling it
+  # leaves that range unscanned until the nightly sweep.
   cancel-in-progress: false
 
 env:
@@ -41,15 +35,13 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # fetch-depth: 0 is required. A shallow clone has no history, so a secret
-      # committed and later removed — the case that matters — would be missed.
+      # fetch-depth: 0 — a shallow clone hides the case that matters most: a
+      # secret committed and later removed.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Downloaded into a temp dir and checksum-verified, never straight into the
-      # working tree: this binary gets read access to every commit in the repo,
-      # and a stray file next to the checkout is a file the scan then reads.
+      # Checksum-verified, and unpacked in a temp dir so the scan never reads it.
       - name: Install gitleaks
         run: |
           set -euo pipefail
@@ -63,13 +55,12 @@ jobs:
           rm -rf "$tmp"
           gitleaks version
 
-      # A full-history sweep on every push is wasted minutes — the nightly run
-      # already covers that. A push or a PR only needs its own new commits, which
-      # is also the window where a leak can still be caught before it spreads.
+      # Push and PR scan only their own commits — the window where a leak can
+      # still be caught cheaply. Nightly and dispatch sweep everything.
       #
-      # Anything unexpected — a new branch, a force push, a base commit that is
-      # not in this clone — falls back to the full sweep. Scanning too much is a
-      # cost; scanning nothing while reporting green is a failure.
+      # Anything unresolvable (new branch, force push, base missing from the
+      # clone) falls back to the full sweep: scanning nothing while reporting
+      # green is the one outcome worth avoiding.
       - name: Determine scan range
         id: scope
         env:
@@ -101,13 +92,10 @@ jobs:
           fi
           echo "log_opts=$log_opts" >> "$GITHUB_OUTPUT"
 
-      # --redact keeps the matched value out of the run log. A CI log is readable
-      # by anyone with repo access, so printing the secret to prove it leaked
-      # leaks it again, somewhere that outlives the branch.
-      #
-      # --config is named rather than auto-detected: renaming .gitleaks.toml then
-      # fails loudly instead of silently falling back to the defaults and
-      # dropping every Fabric rule.
+      # --redact: a CI log is readable by anyone with repo access, so printing a
+      # secret to prove it leaked leaks it again.
+      # --config named, so renaming the file fails loudly instead of silently
+      # falling back to the defaults and dropping every Fabric rule.
       - name: Scan
         env:
           LOG_OPTS: ${{ steps.scope.outputs.log_opts }}
@@ -125,9 +113,7 @@ jobs:
           fi
           gitleaks "${args[@]}"
 
-      # if: always() — a failed scan is exactly the run whose report is worth
-      # keeping. Values inside are redacted; the file locates findings, it does
-      # not carry them.
+      # always() — a failed scan is exactly the run whose report is worth keeping.
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
@@ -164,15 +150,11 @@ jobs:
               echo "|---|---|---|---|"
               jq -r '.[] | "| \(.RuleID) | `\(.File)` | \(.StartLine) | `\(.Commit[0:8])` |"' "$report"
               echo ""
-              echo "> Values are redacted here and in the artifact. Download"
-              echo "> \`gitleaks-report-${{ github.run_id }}\` for the full locations."
+              echo "### Rotate the credential, do not just delete the line"
               echo ""
-              echo "### This is a rotate signal, not a delete signal"
+              echo "Deleting it in a later commit leaves it in history, and anyone"
+              echo "who already cloned or forked has it regardless."
               echo ""
-              echo "Deleting the line in a later commit leaves the secret in history,"
-              echo "where it stays readable — and anyone who already cloned or forked"
-              echo "has it regardless. **Rotate the credential first**, then clean up."
-              echo ""
-              echo "Runbook: \`GITLEAKS.md\`."
+              echo "Values are redacted here and in the artifact. Runbook: \`GITLEAKS.md\`."
             } >> "$GITHUB_STEP_SUMMARY"
           fi
