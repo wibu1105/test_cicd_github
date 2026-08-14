@@ -1,28 +1,14 @@
-# Gitleaks — Test Scenario
+# Gitleaks — Demo Scenario
 
-An end-to-end exercise of every rule, the allowlist, the history scan, and how
-gitleaks interacts with the Fabric CI workflows.
+Three cases, run entirely through GitHub Actions. No local gitleaks install.
+
+Each case has a point to make; run them in order, the narrative builds.
 
 > **Every secret below is fabricated.** They match by *shape*, not by value.
-> Never test with a real credential, including an expired one.
+> Never demo with a real credential, including an expired one.
 
-> **Use a throwaway branch and delete it afterwards.** The fixtures land in that
+> **Use a throwaway branch and delete it afterwards.** The fixtures stay in that
 > branch's history permanently. Never merge it.
-
----
-
-## What is being tested
-
-| # | Case | Proves |
-|---|---|---|
-| 1 | Default ruleset | `useDefault = true` is live |
-| 2 | `fabric-connection-string-password` | custom rule 1 fires |
-| 3 | `fabric-api-bearer-token` | custom rule 2 fires |
-| 4 | Token inside `fabric/` | the folder is not path-excluded |
-| 5 | Templated secrets | no false positive on real repo code |
-| 6 | Allowlist patterns | `${{ secrets.X }}` and `$items.` pass |
-| 7 | Deleted secret | history scan still finds it |
-| 8 | PR gate | gitleaks blocks a PR alongside `validate-pr.yml` |
 
 ---
 
@@ -31,213 +17,118 @@ gitleaks interacts with the Fabric CI workflows.
 ```bash
 git checkout dev
 git pull
-git checkout -b demo/gitleaks-test
-mkdir -p gitleaks-fixtures
+git checkout -b demo/gitleaks
 ```
 
 ---
 
-## Case 1 — Default ruleset
+## Case 1 — It catches a leak, and leaves real code alone
 
-`gitleaks-fixtures/01-aws.txt`:
+The point: **the ruleset was written for this repo, not copied off the shelf.**
 
-```
-aws_access_key_id = AKIAIOSFODNN7EXAMPLE
-aws_secret_access_key = wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-```
-
-AWS's own documented example key. Expect rule `aws-access-token`.
-
-**Why it matters:** confirms the custom config did not accidentally replace the
-defaults. A config with `useDefault = false` would pass this file.
-
----
-
-## Case 2 — Warehouse connection string
-
-`gitleaks-fixtures/02-connection.txt`:
-
-```
-CONN="Server=tcp:abc123.datawarehouse.fabric.microsoft.com,1433;Initial Catalog=insurance_WH;User Id=svc-deploy;Password=Fabr1c!Demo2026;"
-```
-
-Expect rule `fabric-connection-string-password`.
-
-This is the rule written for the real risk in this repo:
-[`deploy-warehouse.yml`](.github/workflows/deploy-warehouse.yml) and
-[`run_sql.py`](cicd/run_sql.py) both assemble ODBC connection strings, and the
-failure mode is someone pasting a working one in to debug.
-
----
-
-## Case 3 — Fabric REST API token
-
-`gitleaks-fixtures/03-bearer.py`:
-
-```python
-headers = {
-    "Authorization": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJodHRwczovL2FwaS5mYWJyaWMubWljcm9zb2Z0LmNvbSJ9.Zm9yLXRlc3Rpbmctb25seS1ub3QtYS1yZWFsLXRva2Vu"
-}
-```
-
-Expect rule `fabric-api-bearer-token`.
-
----
-
-## Case 4 — Token inside `fabric/`
-
-`fabric/test_LH.Lakehouse/04-debug-notes.json`:
-
-```json
-{
-  "note": "temp while debugging the items API",
-  "auth": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJkZW1vIn0.ZmFrZS1zaWduYXR1cmUtZm9yLXRlc3Rpbmc"
-}
-```
-
-Expect rule `fabric-api-bearer-token`.
-
-**This is the most important case.** `fabric/` is the noisiest folder in the
-repo — workspace GUIDs, logicalIds, OneLake paths — which makes excluding it
-tempting the first time a scan is loud. It is also exactly where a debugging
-token gets pasted. If this case passes silently, someone has added `fabric/` to
-`paths` in [`.gitleaks.toml`](.gitleaks.toml) and the scanner is off where it is
-needed most.
-
----
-
-## Case 5 — Templated secrets must NOT fire
-
-`gitleaks-fixtures/05-safe-templates.yml`:
+Create `demo-leak.yml`:
 
 ```yaml
-# Copies of real lines from this repo. All four must pass clean.
-conn_yaml: "Password=$AZURE_CLIENT_SECRET"
-conn_py: 'f"PWD={client_secret};"'
-gh_expr: "${{ secrets.AZURE_CLIENT_ID }}"
-placeholder: "$items.Lakehouse.test_LH.$id"
+# One of these four is a leak. Three are lines copied from this repo.
+leaked:      "Password=Fabr1c!Demo2026;"
+from_yml:    "Password=$AZURE_CLIENT_SECRET"
+from_python: 'f"PWD={client_secret};"'
+gh_secret:   "${{ secrets.AZURE_CLIENT_ID }}"
 ```
-
-Expect **no findings**.
-
-| Line | Passes because |
-|---|---|
-| `Password=$AZURE_CLIENT_SECRET` | rule excludes `$` after `=` |
-| `PWD={client_secret}` | rule excludes `{` after `=` |
-| `${{ secrets.X }}` | allowlist regex |
-| `$items.Lakehouse.test_LH.$id` | allowlist regex |
-
-A finding here is a **false positive** and means the rules would fire on real
-repo code — the fastest way to get a scanner switched off entirely.
-
----
-
-## Case 6 — Run the scan
-
-### Locally (fastest)
 
 ```bash
-gitleaks detect --no-git --source . --config .gitleaks.toml --verbose
+git add demo-leak.yml
+git commit -m "demo: leaked connection string"
+git push origin demo/gitleaks
 ```
 
-Expected: **4 findings** — cases 1, 2, 3, 4. Nothing from case 5.
+Actions → **Gitleaks** → run fails with **exactly one** finding:
 
-### In CI
-
-```bash
-git add gitleaks-fixtures fabric/test_LH.Lakehouse/04-debug-notes.json
-git commit -m "test: gitleaks fixtures"
-git push origin demo/gitleaks-test
+```
+RuleID:  fabric-connection-string-password
+File:    demo-leak.yml
+Line:    2
 ```
 
-Actions → **Gitleaks** → the run fails. Open it and check the `RuleID` of each
-finding against the table above.
+### What to show the audience
 
-### Results checklist
+Put the finding next to the file. Four lines, all containing `Password=` or a
+secret reference. **One red, three green.**
 
-| Case | Expected `RuleID` | Got it? |
+| Line | Result | Why |
 |---|---|---|
-| 1 | `aws-access-token` | ☐ |
-| 2 | `fabric-connection-string-password` | ☐ |
-| 3 | `fabric-api-bearer-token` | ☐ |
-| 4 | `fabric-api-bearer-token` (in `fabric/`) | ☐ |
-| 5 | *nothing* | ☐ |
+| `Password=Fabr1c!Demo2026;` | 🔴 | a literal value |
+| `Password=$AZURE_CLIENT_SECRET` | 🟢 | rule excludes `$` after `=` |
+| `PWD={client_secret}` | 🟢 | rule excludes `{` after `=` |
+| `${{ secrets.AZURE_CLIENT_ID }}` | 🟢 | allowlisted — only the name is in the repo |
+
+Open [`deploy-warehouse.yml`](.github/workflows/deploy-warehouse.yml) and
+[`run_sql.py`](cicd/run_sql.py) alongside it: those green lines are real,
+shipping code. A ruleset that flagged them would be switched off within a week.
 
 ---
 
-## Case 7 — A deleted secret is still a leak
+## Case 2 — Deleting the secret does not fix it
 
-The point of `fetch-depth: 0`.
-
-```bash
-git rm gitleaks-fixtures/02-connection.txt
-git commit -m "test: remove the leaked connection string"
-git push origin demo/gitleaks-test
-```
-
-The working tree is now clean. The secret is not:
+The point: **a hit means rotate the credential, not delete the line.**
 
 ```bash
-git log -p -- gitleaks-fixtures/02-connection.txt   # still there
+git rm demo-leak.yml
+git commit -m "demo: remove the leak"
+git push origin demo/gitleaks
 ```
 
-Now run a **full-history** scan — Actions → Gitleaks → **Run workflow**, with
-this branch selected.
+The working tree is clean now. Show that the secret is not:
 
-Expected: **still fails**, still reports case 2.
+```bash
+git log -p -- demo-leak.yml
+```
 
-This is the case that justifies the whole runbook. Deleting the line changed
-nothing about who can read the secret, which is why a hit means *rotate the
-credential*.
+Then Actions → **Gitleaks** → **Run workflow**, with `demo/gitleaks` selected.
+That is the full-history scan.
+
+Expected: **still fails, still reports the same finding.**
+
+### What to show the audience
+
+Deleting the file changed nothing about who can read the secret. Anyone who
+cloned already has it; forks keep their own copy.
+
+This is what `fetch-depth: 0` in the workflow is for — a shallow clone has no
+history, and this case would pass.
+
+It is also the reason [`GITLEAKS.md`](GITLEAKS.md#when-a-scan-goes-red) leads
+with `az ad app credential reset` rather than "remove the line".
 
 ---
 
-## Case 8 — The PR gate, with Fabric CI
+## Case 3 — It gates the pull request, next to the Fabric checks
 
-Open a pull request from `demo/gitleaks-test` into `test`.
+The point: **two workflows, two different questions.**
 
-Two workflows fire, and they check different things:
+Open a pull request from `demo/gitleaks` into `test`.
 
-| Workflow | Checks | Expected |
+Two workflows run:
+
+| Workflow | Asks | Result |
 |---|---|---|
-| **Gitleaks** | secrets in the diff and history | 🔴 fails, comments on the PR |
-| **Validate pull request** | repo structure, `parameter.yml` coverage, notebook portability, T-SQL batching, dacpac build | 🟢 passes — fixtures break none of it |
+| **Gitleaks** | is anything in here secret? | 🔴 fails, comments on the PR |
+| **Validate pull request** | will this deploy correctly? | 🟢 passes |
 
-The split is the point:
+### What to show the audience
 
-- `validate-pr.yml` answers *"will this deploy correctly?"*
-- `gitleaks.yml` answers *"is anything in here secret?"*
+The PR page, with one check red and one green.
 
-A change can pass one and fail the other. Neither substitutes for the other, and
-a branch ruleset requiring both is what makes the pair a gate rather than a
-suggestion.
+`validate-pr.yml` passes because the fixture breaks nothing it looks at — repo
+structure, `parameter.yml` coverage, notebook portability, T-SQL batching, the
+dacpac build. It is a perfectly valid deployment that happens to contain a
+credential.
 
-> Case 4 puts a stray `.json` inside a Lakehouse item folder. `validate_repo.py`
-> tolerates it — it only requires each item folder to carry a `.platform`. But
-> if this branch were ever deployed, `fabric-cicd` would publish that file as
-> part of the item. One more reason never to merge it.
+That is the argument for having both. A change can pass one and fail the other,
+and neither substitutes for the other.
 
----
-
-## Case 9 — Pre-commit hook (optional)
-
-Only if the hook from [GITLEAKS.md](GITLEAKS.md#local-pre-commit-hook) is
-installed.
-
-```bash
-echo 'password=hunter2supersecret' > gitleaks-fixtures/09-hook.txt
-git add gitleaks-fixtures/09-hook.txt
-git commit -m "test: hook"
-```
-
-Expected: **the commit is refused** before it exists.
-
-```bash
-git commit -m "test: hook" --no-verify   # succeeds — bypass is deliberate
-```
-
-The bypass proves why CI still matters: the hook is a convenience, not a
-control.
+The bot comment on the PR is worth pointing at too — the developer who caused it
+sees it where they are already looking, without opening the Actions tab.
 
 ---
 
@@ -245,12 +136,11 @@ control.
 
 ```bash
 git checkout dev
-git branch -D demo/gitleaks-test
-git push origin --delete demo/gitleaks-test
+git branch -D demo/gitleaks
+git push origin --delete demo/gitleaks
 ```
 
-Delete the branch on GitHub too, so the fixtures stop appearing in search and in
-the nightly full-history scan.
+Close the pull request without merging.
 
-> If the nightly scan keeps failing after cleanup, the branch still exists
-> somewhere — check `git branch -a` and the repo's branch list.
+Delete the remote branch, not just the local one — otherwise the fixtures stay
+in the repo and the nightly full-history scan keeps failing on them.
