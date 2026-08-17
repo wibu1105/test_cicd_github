@@ -1,32 +1,38 @@
 # Secret scanning. See GITLEAKS.md for the runbook.
 #
-# Uses the pinned binary, not gitleaks-action: the action is licensed per
-# organization, so it would start failing the day this repo moves into one.
+# The only workflow here that is not dispatch-only: a scanner is worth nothing
+# if it waits to be remembered.
+#
+# gitleaks-action installs the binary, picks the commit range for the event,
+# writes the job summary, uploads a SARIF artifact and comments on the pull
+# request. GITLEAKS_LICENSE is required only for repositories owned by an
+# organization — this one sits under a user account, where the action is free.
 
 name: Gitleaks
 
 on:
-  # push covers the long-lived branches, pull_request covers everything else.
-  # Listing feature branches in both would scan the same commits twice.
+  # Long-lived branches only. Feature branches are already covered by
+  # pull_request, and listing them in both places scans the same commits twice.
   push:
     branches: [dev, test, prod]
   pull_request:
   workflow_dispatch:
-  # Rules improve: a commit that looked clean last month can match a new one.
+  # Only fires from the default branch. Rules improve, so a commit that looked
+  # clean last month can match a rule added since.
   schedule:
     - cron: "0 4 * * *"
 
 permissions:
   contents: read
+  # The action comments on the pull request when it finds something. Without
+  # this the scan still fails correctly, but the comment silently does not post.
+  pull-requests: write
 
 concurrency:
   group: gitleaks-${{ github.ref }}
-  # Not cancelled — a push run scans only its own commits, so cancelling it
-  # leaves that range unscanned until the nightly sweep.
+  # Not cancelled. A push run scans only that push's commits, so cancelling one
+  # leaves its range unscanned until the nightly sweep.
   cancel-in-progress: false
-
-env:
-  GITLEAKS_VERSION: "8.30.1"
 
 jobs:
   scan:
@@ -35,126 +41,26 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # fetch-depth: 0 — a shallow clone hides the case that matters most: a
-      # secret committed and later removed.
-      - uses: actions/checkout@v4
+      # fetch-depth: 0 is required. A shallow clone has no history, so a secret
+      # committed and later removed — the case that matters — would be missed.
+      #
+      # v6 is the Node 24 release, matching the runtime gitleaks-action@v3 moved
+      # to. GitHub removes Node 20 from hosted runners on 16 Sep 2026.
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      # Checksum-verified, and unpacked in a temp dir so the scan never reads it.
-      - name: Install gitleaks
-        run: |
-          set -euo pipefail
-          base="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}"
-          tmp="$(mktemp -d)"
-          curl -sSfL -o "$tmp/gitleaks.tar.gz" "${base}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          curl -sSfL -o "$tmp/checksums.txt"   "${base}/gitleaks_${GITLEAKS_VERSION}_checksums.txt"
-          ( cd "$tmp" && grep "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" checksums.txt | sha256sum -c - )
-          tar -xzf "$tmp/gitleaks.tar.gz" -C "$tmp" gitleaks
-          sudo install -m 0755 "$tmp/gitleaks" /usr/local/bin/gitleaks
-          rm -rf "$tmp"
-          gitleaks version
-
-      # Push and PR scan only their own commits — the window where a leak can
-      # still be caught cheaply. Nightly and dispatch sweep everything.
-      #
-      # Anything unresolvable (new branch, force push, base missing from the
-      # clone) falls back to the full sweep: scanning nothing while reporting
-      # green is the one outcome worth avoiding.
-      - name: Determine scan range
-        id: scope
+      - uses: gitleaks/gitleaks-action@v3
         env:
-          EVENT: ${{ github.event_name }}
-          PUSH_BEFORE: ${{ github.event.before }}
-          PUSH_AFTER: ${{ github.sha }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -uo pipefail
-          have() { [ -n "${1:-}" ] && git cat-file -e "${1}^{commit}" 2>/dev/null; }
-          log_opts=""
-          case "$EVENT" in
-            pull_request)
-              if have "$PR_BASE" && have "$PR_HEAD"; then
-                log_opts="--no-merges $PR_BASE..$PR_HEAD"
-              fi
-              ;;
-            push)
-              if [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ] && have "$PUSH_BEFORE"; then
-                log_opts="--no-merges $PUSH_BEFORE..$PUSH_AFTER"
-              fi
-              ;;
-          esac
-          if [ -n "$log_opts" ]; then
-            echo "Scanning range : $log_opts"
-          else
-            echo "Scanning       : full history"
-          fi
-          echo "log_opts=$log_opts" >> "$GITHUB_OUTPUT"
-
-      # --redact: a CI log is readable by anyone with repo access, so printing a
-      # secret to prove it leaked leaks it again.
-      # --config named, so renaming the file fails loudly instead of silently
-      # falling back to the defaults and dropping every Fabric rule.
-      - name: Scan
-        env:
-          LOG_OPTS: ${{ steps.scope.outputs.log_opts }}
-        run: |
-          set -uo pipefail
-          args=(git .
-                --config .gitleaks.toml
-                --redact
-                --report-format json
-                --report-path gitleaks-report.json
-                --exit-code 1
-                --verbose)
-          if [ -n "$LOG_OPTS" ]; then
-            args+=(--log-opts "$LOG_OPTS")
-          fi
-          gitleaks "${args[@]}"
-
-      # always() — a failed scan is exactly the run whose report is worth keeping.
-      - name: Upload report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gitleaks-report-${{ github.run_id }}
-          path: gitleaks-report.json
-          retention-days: 30
-          if-no-files-found: ignore
-
-      - name: Summary
-        if: always()
-        run: |
-          set -uo pipefail
-          report="gitleaks-report.json"
-          count=0
-          if [ -s "$report" ]; then
-            count="$(jq 'length' "$report" 2>/dev/null || echo 0)"
-          fi
-
-          {
-            echo "## Gitleaks"
-            echo ""
-            echo "| | |"
-            echo "|---|---|"
-            echo "| Scope | ${{ steps.scope.outputs.log_opts && 'incremental' || 'full history' }} |"
-            echo "| Version | ${GITLEAKS_VERSION} |"
-            echo "| Findings | ${count} |"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-          if [ "$count" -gt 0 ]; then
-            {
-              echo ""
-              echo "| Rule | File | Line | Commit |"
-              echo "|---|---|---|---|"
-              jq -r '.[] | "| \(.RuleID) | `\(.File)` | \(.StartLine) | `\(.Commit[0:8])` |"' "$report"
-              echo ""
-              echo "### Rotate the credential, do not just delete the line"
-              echo ""
-              echo "Deleting it in a later commit leaves it in history, and anyone"
-              echo "who already cloned or forked has it regardless."
-              echo ""
-              echo "Values are redacted here and in the artifact. Runbook: \`GITLEAKS.md\`."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
+          # Used to post the PR comment.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Empty on a user account, and ignored there. Left in place so moving
+          # this repo into an organization is one secret, not one edit.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          # Named rather than auto-detected: renaming .gitleaks.toml then fails
+          # loudly instead of silently falling back to the defaults and dropping
+          # every Fabric rule.
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # Pinned, not `latest`. A release that changes what counts as a
+          # finding should arrive as a commit here, not as a surprise.
+          GITLEAKS_VERSION: 8.30.1
