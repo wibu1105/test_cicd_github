@@ -1,0 +1,11 @@
+# File test cho gitleaks. Moi secret o day deu la GIA -- chung khop theo hinh
+# dang, khong phai theo gia tri. Branch nay se bi xoa sau khi test xong.
+#
+# 2 dong dau la leak that. 3 dong cuoi copy tu code that trong repo, phai xanh.
+
+leaked_pwd:  "Password=Fabr1c!Demo2026;"
+leaked_sas:  "https://onelake.dfs.fabric.microsoft.com/ws/it?sv=2024-11-04&sig=Xk9mQ2vLp7WdY4hTn8sBqR3jF6cA1zUe5gN0iM="
+
+from_yml:    "Password=$AZURE_CLIENT_SECRET"
+from_python: 'f"PWD={client_secret};"'
+gh_secret:   "${{ secrets.AZURE_CLIENT_ID }}"
