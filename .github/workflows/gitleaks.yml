@@ -1,0 +1,66 @@
+# Secret scanning. See GITLEAKS.md for the runbook.
+#
+# The only workflow here that is not dispatch-only: a scanner is worth nothing
+# if it waits to be remembered.
+#
+# gitleaks-action installs the binary, picks the commit range for the event,
+# writes the job summary, uploads a SARIF artifact and comments on the pull
+# request. GITLEAKS_LICENSE is required only for repositories owned by an
+# organization — this one sits under a user account, where the action is free.
+
+name: Gitleaks
+
+on:
+  # Long-lived branches only. Feature branches are already covered by
+  # pull_request, and listing them in both places scans the same commits twice.
+  push:
+    branches: [dev, test, prod]
+  pull_request:
+  workflow_dispatch:
+  # Only fires from the default branch. Rules improve, so a commit that looked
+  # clean last month can match a rule added since.
+  schedule:
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: read
+  # The action comments on the pull request when it finds something. Without
+  # this the scan still fails correctly, but the comment silently does not post.
+  pull-requests: write
+
+concurrency:
+  group: gitleaks-${{ github.ref }}
+  # Not cancelled. A push run scans only that push's commits, so cancelling one
+  # leaves its range unscanned until the nightly sweep.
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan for secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # fetch-depth: 0 is required. A shallow clone has no history, so a secret
+      # committed and later removed — the case that matters — would be missed.
+      #
+      # v6 is the Node 24 release, matching the runtime gitleaks-action@v3 moved
+      # to. GitHub removes Node 20 from hosted runners on 16 Sep 2026.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          # Used to post the PR comment.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Empty on a user account, and ignored there. Left in place so moving
+          # this repo into an organization is one secret, not one edit.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          # Named rather than auto-detected: renaming .gitleaks.toml then fails
+          # loudly instead of silently falling back to the defaults and dropping
+          # every Fabric rule.
+          GITLEAKS_CONFIG: .gitleaks.toml
+          # Pinned, not `latest`. A release that changes what counts as a
+          # finding should arrive as a commit here, not as a surprise.
+          GITLEAKS_VERSION: 8.30.1
