@@ -1,0 +1,65 @@
+# Secret scanning. See GITLEAKS.md for the runbook.
+
+name: Gitleaks
+
+on:
+  # Long-lived branches only — feature branches are covered by pull_request,
+  # and listing them in both places scans the same commits twice.
+  push:
+    branches: [dev, test, prod]
+  pull_request:
+  workflow_dispatch:
+  # Rules improve: a commit that looked clean last month can match a new one.
+  schedule:
+    - cron: "0 4 * * *"
+
+permissions:
+  contents: read
+  # Without this the scan still fails correctly, but the PR comment silently
+  # does not post.
+  pull-requests: write
+
+concurrency:
+  group: gitleaks-${{ github.ref }}
+  # A push run scans only that push's commits, so cancelling one leaves its
+  # range unscanned until the nightly sweep.
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    name: Scan for secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # fetch-depth: 0 — a shallow clone hides the case that matters most: a
+      # secret committed and later removed. v6 is the Node 24 release.
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only read for organization-owned repos; empty and ignored here.
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          # Named, so renaming the file fails loudly instead of silently
+          # falling back to the defaults and dropping every Fabric rule.
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_ENABLE_SUMMARY: true
+          GITLEAKS_ENABLE_COMMENTS: true
+          # The step below uploads the same file, and does it on clean runs too.
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
+
+      # results.sarif comes from the action above — no second scan.
+      # always(), because an empty result set is what tells "scanned, found
+      # nothing" apart from "never ran".
+      - name: Upload Gitleaks SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gitleaks-sarif
+          path: results.sarif
+          retention-days: 7
+          if-no-files-found: warn
