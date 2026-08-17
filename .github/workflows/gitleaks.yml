@@ -27,9 +27,6 @@ permissions:
   # The action comments on the pull request when it finds something. Without
   # this the scan still fails correctly, but the comment silently does not post.
   pull-requests: write
-  # Required to upload the SARIF. Without it the upload returns 403 and the run
-  # fails on a step that has nothing to do with what was scanned.
-  security-events: write
 
 concurrency:
   group: gitleaks-${{ github.ref }}
@@ -72,15 +69,22 @@ jobs:
           # same detail commented on the pull request.
           GITLEAKS_ENABLE_SUMMARY: true
           GITLEAKS_ENABLE_COMMENTS: true
+          # Off because the step below uploads the same file. The action only
+          # uploads on a finding, so a clean run would otherwise leave nothing
+          # to download and no way to show the scan ran.
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
 
-      # Puts the findings in Security -> Code scanning, where they get their own
-      # history and show up annotated on the pull request diff. Free on a public
-      # repository; on a private one this step needs GitHub Code Security and
-      # 403s without it.
+      # results.sarif is written by the action above -- no second scan needed.
       #
-      # if: always() because the interesting run is the one that just failed.
-      # gitleaks writes results.sarif either way, empty results included.
-      - uses: github/codeql-action/upload-sarif@v3
+      # if: always() so a clean run produces the file too. That is the whole
+      # point: an empty result set is the evidence the scan ran and found
+      # nothing, which a missing artifact cannot tell you apart from a scan
+      # that never started.
+      - name: Upload Gitleaks SARIF artifact
         if: always()
+        uses: actions/upload-artifact@v7
         with:
-          sarif_file: results.sarif
+          name: gitleaks-sarif
+          path: results.sarif
+          retention-days: 7
+          if-no-files-found: warn
