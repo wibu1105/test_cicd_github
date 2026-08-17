@@ -1,37 +1,28 @@
 # Secret scanning. See GITLEAKS.md for the runbook.
-#
-# The only workflow here that is not dispatch-only: a scanner is worth nothing
-# if it waits to be remembered.
-#
-# gitleaks-action installs the binary, picks the commit range for the event,
-# writes the job summary, uploads a SARIF artifact and comments on the pull
-# request. GITLEAKS_LICENSE is required only for repositories owned by an
-# organization — this one sits under a user account, where the action is free.
 
 name: Gitleaks
 
 on:
-  # Long-lived branches only. Feature branches are already covered by
-  # pull_request, and listing them in both places scans the same commits twice.
+  # Long-lived branches only — feature branches are covered by pull_request,
+  # and listing them in both places scans the same commits twice.
   push:
     branches: [dev, test, prod]
   pull_request:
   workflow_dispatch:
-  # Only fires from the default branch. Rules improve, so a commit that looked
-  # clean last month can match a rule added since.
+  # Rules improve: a commit that looked clean last month can match a new one.
   schedule:
     - cron: "0 4 * * *"
 
 permissions:
   contents: read
-  # The action comments on the pull request when it finds something. Without
-  # this the scan still fails correctly, but the comment silently does not post.
+  # Without this the scan still fails correctly, but the PR comment silently
+  # does not post.
   pull-requests: write
 
 concurrency:
   group: gitleaks-${{ github.ref }}
-  # Not cancelled. A push run scans only that push's commits, so cancelling one
-  # leaves its range unscanned until the nightly sweep.
+  # A push run scans only that push's commits, so cancelling one leaves its
+  # range unscanned until the nightly sweep.
   cancel-in-progress: false
 
 jobs:
@@ -41,45 +32,29 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      # fetch-depth: 0 is required. A shallow clone has no history, so a secret
-      # committed and later removed — the case that matters — would be missed.
-      #
-      # v6 is the Node 24 release, matching the runtime gitleaks-action@v3 moved
-      # to. GitHub removes Node 20 from hosted runners on 16 Sep 2026.
+      # fetch-depth: 0 — a shallow clone hides the case that matters most: a
+      # secret committed and later removed. v6 is the Node 24 release.
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - uses: gitleaks/gitleaks-action@v3
         env:
-          # Used to post the PR comment.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Empty on a user account, and ignored there. Left in place so moving
-          # this repo into an organization is one secret, not one edit.
+          # Only read for organization-owned repos; empty and ignored here.
           GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
-          # Named rather than auto-detected: renaming .gitleaks.toml then fails
-          # loudly instead of silently falling back to the defaults and dropping
-          # every Fabric rule.
+          # Named, so renaming the file fails loudly instead of silently
+          # falling back to the defaults and dropping every Fabric rule.
           GITLEAKS_CONFIG: .gitleaks.toml
-          # Pinned, not `latest`. A release that changes what counts as a
-          # finding should arrive as a commit here, not as a surprise.
           GITLEAKS_VERSION: 8.30.1
-          # Both default to true. Stated anyway: they are how a finding is read
-          # -- a table in the job summary linking each hit to its line, and the
-          # same detail commented on the pull request.
           GITLEAKS_ENABLE_SUMMARY: true
           GITLEAKS_ENABLE_COMMENTS: true
-          # Off because the step below uploads the same file. The action only
-          # uploads on a finding, so a clean run would otherwise leave nothing
-          # to download and no way to show the scan ran.
+          # The step below uploads the same file, and does it on clean runs too.
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: false
 
-      # results.sarif is written by the action above -- no second scan needed.
-      #
-      # if: always() so a clean run produces the file too. That is the whole
-      # point: an empty result set is the evidence the scan ran and found
-      # nothing, which a missing artifact cannot tell you apart from a scan
-      # that never started.
+      # results.sarif comes from the action above — no second scan.
+      # always(), because an empty result set is what tells "scanned, found
+      # nothing" apart from "never ran".
       - name: Upload Gitleaks SARIF artifact
         if: always()
         uses: actions/upload-artifact@v7
